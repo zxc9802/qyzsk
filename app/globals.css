@@ -1,0 +1,156 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap');
+@import "tailwindcss";
+
+@theme inline {
+  --color-ink: #1a1a1a;
+  --color-ink-soft: #5a5a5a;
+  --color-ink-muted: #9a9a9a;
+
+  --color-sidebar: #1a2332;
+  --color-sidebar-hover: #243044;
+  --color-sidebar-active: #2d3d56;
+  --color-sidebar-text: #c8cdd4;
+  --color-sidebar-text-bright: #f0f2f5;
+
+  --color-surface: #faf8f5;
+  --color-surface-raised: #ffffff;
+  --color-surface-sunken: #f3f0eb;
+
+  --color-amber: #d4944c;
+  --color-amber-soft: #e8b87a;
+  --color-amber-glow: #fef3e2;
+  --color-amber-deep: #b87a35;
+
+  --color-sage: #e8f5e9;
+  --color-sage-border: #a5d6a7;
+  --color-sage-text: #2e7d32;
+
+  --color-border: #e8e4df;
+  --color-border-light: #f0ece7;
+
+  --font-sans: 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+  --font-display: 'Playfair Display', Georgia, serif;
+}
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-ink-muted); }
+
+.sidebar-scroll::-webkit-scrollbar-thumb { background: var(--color-sidebar-hover); }
+.sidebar-scroll::-webkit-scrollbar-thumb:hover { background: var(--color-sidebar-active); }
+
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+.noise::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  opacity: 0.015;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  z-index: 9999;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.streaming-cursor::after {
+  content: '\25CA';
+  color: var(--color-amber);
+  animation: blink 0.8s ease-in-out infinite;
+  margin-left: 2px;
+  font-size: 0.85em;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up { animation: fadeUp 0.4s ease-out forwards; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in { animation: slideInLeft 0.3s ease-out forwards; }
+
+@keyframes backdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-backdrop { animation: backdropIn 0.25s ease-out forwards; }
+.animate-modal { animation: modalIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+.ai-markdown h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-ink);
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--color-border-light);
+}
+.ai-markdown h3:first-child { margin-top: 0; }
+.ai-markdown p {
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--color-ink-soft);
+  margin-bottom: 0.6rem;
+}
+.ai-markdown ul, .ai-markdown ol {
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--color-ink-soft);
+  padding-left: 1.65rem;
+  margin-left: 0.15rem;
+  margin-bottom: 0.7rem;
+}
+.ai-markdown li { margin-bottom: 0.36rem; }
+.ai-markdown ul li::marker,
+.ai-markdown ol li::marker {
+  color: var(--color-ink-soft);
+}
+.ai-markdown strong { color: var(--color-ink); font-weight: 600; }
+.ai-markdown code {
+  background: var(--color-surface-sunken);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+.ai-markdown blockquote {
+  border-left: 3px solid var(--color-amber);
+  padding-left: 0.75rem;
+  margin: 0.75rem 0;
+  color: var(--color-ink-soft);
+  font-style: italic;
+}
+
+.conclusion-box {
+  background: var(--color-sage);
+  border-left: 4px solid var(--color-sage-border);
+  border-radius: 0 8px 8px 0;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+}
+.conclusion-box p {
+  color: var(--color-sage-text) !important;
+  font-weight: 500;
+  margin: 0;
+}

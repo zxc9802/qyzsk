@@ -1,0 +1,357 @@
+import fs from "fs";
+import path from "path";
+import type { KnowledgeBaseHit } from "@/lib/types";
+
+type KnowledgeBaseEntry = {
+  id: string;
+  title: string;
+  category: string;
+  roles: string[];
+  triggerQuestions: string[];
+  standardAnswer: string;
+  framework: string;
+  nextActions: string;
+  relatedTerms: string[];
+};
+
+type QuerySignals = {
+  normalizedQuery: string;
+  phrases: string[];
+  looseTerms: string[];
+};
+
+const MAX_KB_CONTEXT_CHARS = 12000;
+const MIN_SELECTED_ENTRIES = 3;
+const MAX_SELECTED_ENTRIES = 6;
+const STOP_TERMS = new Set([
+  "什么",
+  "怎么",
+  "怎么办",
+  "为什么",
+  "是否",
+  "是不是",
+  "怎么做",
+  "如何",
+  "一个",
+  "一下",
+  "现在",
+  "最近",
+  "这个",
+  "那个",
+  "我们",
+  "你们",
+  "公司",
+  "问题",
+]);
+const QUERY_EXPANSIONS: Array<[string, string[]]> = [
+  ["不出单", ["转化", "成交", "下单", "漏斗"]],
+  ["没单", ["不出单", "转化", "成交"]],
+  ["卖不动", ["转化", "成交", "购买动机"]],
+  ["流量起不来", ["冷启动", "曝光", "点击"]],
+  ["冷启动", ["起号", "流量起不来", "验证"]],
+  ["起号", ["冷启动", "验证", "流量起不来"]],
+  ["店铺", ["运营", "转化", "履约"]],
+  ["排查", ["诊断", "漏斗", "归因"]],
+  ["达人合作", ["达人建联", "合作效率", "协同"]],
+  ["推进不下去", ["效率", "推进", "协同"]],
+  ["产品值不值得做", ["需求", "购买动机", "渠道适配", "超级产品"]],
+  ["值不值得做", ["需求", "购买动机", "渠道适配"]],
+];
+const ROLE_LABELS: Record<string, string[]> = {
+  product: ["产品岗", "产品负责人"],
+  video: ["视频岗", "内容岗"],
+  operation: ["运营岗"],
+  bd: ["BD岗", "达人岗", "流量岗"],
+  live: ["直播岗", "主播"],
+  management: ["管理层", "管理者"],
+  tech: ["技术岗"],
+  new: ["全员", "新员工"],
+};
+
+let kbCache: KnowledgeBaseEntry[] | null = null;
+
+function getKnowledgeBaseEntries(): KnowledgeBaseEntry[] {
+  if (kbCache) return kbCache;
+
+  const kbPath = path.join(process.cwd(), "lib", "kb-content.txt");
+  const raw = fs.readFileSync(kbPath, "utf8");
+  kbCache = parseKnowledgeBaseEntries(raw);
+  return kbCache;
+}
+
+function parseKnowledgeBaseEntries(raw: string): KnowledgeBaseEntry[] {
+  const headingPattern = /^(?:<a [^>]+><\/a>)?###\s*(KB\d{3})｜(.+)$/gm;
+  const matches = [...raw.matchAll(headingPattern)];
+
+  return matches.map((match, index) => {
+    const start = (match.index || 0) + match[0].length;
+    const end = index + 1 < matches.length ? matches[index + 1].index || raw.length : raw.length;
+    const block = raw.slice(start, end);
+    const fields = parseEntryFields(block);
+
+    return {
+      id: match[1].trim(),
+      title: cleanValue(match[2]),
+      category: cleanValue(fields.category || ""),
+      roles: splitValue(fields.roles),
+      triggerQuestions: splitValue(fields.trigger_questions),
+      standardAnswer: cleanValue(fields.standard_answer || ""),
+      framework: cleanValue(fields.framework || ""),
+      nextActions: cleanValue(fields.next_actions || ""),
+      relatedTerms: splitValue(fields.related_terms),
+    };
+  });
+}
+
+function parseEntryFields(block: string): Record<string, string> {
+  const result: Record<string, string> = {};
+
+  for (const rawLine of block.split("\n")) {
+    const line = rawLine.trim();
+    if (!line.startsWith("- ")) continue;
+
+    const colonIndex = line.indexOf(":");
+    if (colonIndex === -1) continue;
+
+    const key = line
+      .slice(2, colonIndex)
+      .trim()
+      .replace(/\\/g, "")
+      .toLowerCase();
+    const value = line.slice(colonIndex + 1).trim();
+
+    result[key] = value;
+  }
+
+  return result;
+}
+
+function cleanValue(value: string): string {
+  return value
+    .replace(/\\([_+])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitValue(value?: string): string[] {
+  if (!value) return [];
+
+  return cleanValue(value)
+    .split(/\s*\/\s*|\s*,\s*|\s*，\s*|\s*、\s*/u)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildQuerySignals(query: string): QuerySignals {
+  const normalizedQuery = normalize(query);
+  const phraseSet = new Set<string>();
+  const looseTermSet = new Set<string>();
+
+  normalizedQuery
+    .split(/[^\p{L}\p{N}\u4e00-\u9fff]+/u)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 2 && !STOP_TERMS.has(part))
+    .forEach((part) => {
+      phraseSet.add(part);
+      if (part.length <= 4) {
+        looseTermSet.add(part);
+      }
+    });
+
+  const hanMatches = normalizedQuery.match(/[\u4e00-\u9fff]{2,}/g) || [];
+  hanMatches.forEach((part) => {
+    if (!STOP_TERMS.has(part)) {
+      phraseSet.add(part);
+    }
+
+    if (part.length >= 4) {
+      for (let index = 0; index <= part.length - 3; index += 1) {
+        const triGram = part.slice(index, index + 3);
+        if (!STOP_TERMS.has(triGram)) {
+          looseTermSet.add(triGram);
+        }
+      }
+    }
+  });
+
+  for (const [trigger, expansions] of QUERY_EXPANSIONS) {
+    if (!normalizedQuery.includes(trigger)) continue;
+
+    expansions.forEach((item) => {
+      phraseSet.add(item);
+      if (item.length <= 4) {
+        looseTermSet.add(item);
+      }
+    });
+  }
+
+  return {
+    normalizedQuery,
+    phrases: Array.from(phraseSet),
+    looseTerms: Array.from(looseTermSet),
+  };
+}
+
+function normalize(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function scoreEntry(entry: KnowledgeBaseEntry, signals: QuerySignals, role: string): number {
+  const title = normalize(entry.title);
+  const category = normalize(entry.category);
+  const standardAnswer = normalize(entry.standardAnswer);
+  const framework = normalize(entry.framework);
+  const nextActions = normalize(entry.nextActions);
+  const triggerQuestions = entry.triggerQuestions.map(normalize);
+  const relatedTerms = entry.relatedTerms.map(normalize);
+
+  let score = 0;
+
+  for (const phrase of signals.phrases) {
+    if (title.includes(phrase)) score += 48;
+    if (category.includes(phrase)) score += 18;
+    if (triggerQuestions.some((item) => item.includes(phrase))) score += 42;
+    if (relatedTerms.some((item) => item.includes(phrase))) score += 36;
+    if (standardAnswer.includes(phrase)) score += 16;
+    if (framework.includes(phrase)) score += 14;
+    if (nextActions.includes(phrase)) score += 12;
+  }
+
+  for (const term of signals.looseTerms) {
+    if (title.includes(term)) score += 12;
+    if (triggerQuestions.some((item) => item.includes(term))) score += 10;
+    if (relatedTerms.some((item) => item.includes(term))) score += 10;
+    if (standardAnswer.includes(term)) score += 4;
+    if (framework.includes(term)) score += 4;
+  }
+
+  if (
+    signals.normalizedQuery &&
+    triggerQuestions.some((item) => item.includes(signals.normalizedQuery) || signals.normalizedQuery.includes(item))
+  ) {
+    score += 80;
+  }
+
+  const roleLabels = ROLE_LABELS[role] || [];
+  if (entry.roles.includes("全员")) {
+    score += 8;
+  }
+  if (roleLabels.some((label) => entry.roles.includes(label))) {
+    score += 14;
+  }
+
+  return score;
+}
+
+function selectEntries(
+  entries: KnowledgeBaseEntry[],
+  signals: QuerySignals,
+  role: string
+): KnowledgeBaseEntry[] {
+  const ranked = entries
+    .map((entry) => ({
+      entry,
+      score: scoreEntry(entry, signals, role),
+    }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score);
+
+  if (ranked.length === 0) return [];
+
+  const topScore = ranked[0].score;
+  const threshold = Math.max(24, Math.floor(topScore * 0.34));
+  const selected: KnowledgeBaseEntry[] = [];
+
+  for (const item of ranked) {
+    if (selected.length >= MAX_SELECTED_ENTRIES) break;
+    if (selected.length >= MIN_SELECTED_ENTRIES && item.score < threshold) break;
+
+    selected.push(item.entry);
+  }
+
+  return selected;
+}
+
+function buildEntryBlock(entry: KnowledgeBaseEntry): string {
+  const lines = [
+    `条目：${entry.id}｜${entry.title}`,
+    `分类：${entry.category || "未分类"}`,
+  ];
+
+  if (entry.roles.length > 0) {
+    lines.push(`适用岗位：${entry.roles.join("、")}`);
+  }
+
+  if (entry.relatedTerms.length > 0) {
+    lines.push(`相关词：${entry.relatedTerms.join("、")}`);
+  }
+
+  lines.push(`标准回答：${entry.standardAnswer}`);
+
+  if (entry.framework) {
+    lines.push(`方法框架：${entry.framework}`);
+  }
+
+  if (entry.nextActions) {
+    lines.push(`下一步动作：${entry.nextActions}`);
+  }
+
+  return lines.join("\n");
+}
+
+function toKnowledgeBaseHit(entry: KnowledgeBaseEntry): KnowledgeBaseHit {
+  return {
+    id: entry.id,
+    title: entry.title,
+    category: entry.category || "未分类",
+  };
+}
+
+export function buildKnowledgeBaseRetrieval(query: string, role: string): {
+  context: string;
+  hits: KnowledgeBaseHit[];
+} {
+  const signals = buildQuerySignals(query);
+  const selectedEntries = selectEntries(getKnowledgeBaseEntries(), signals, role);
+
+  if (selectedEntries.length === 0) {
+    return {
+      context: "",
+      hits: [],
+    };
+  }
+
+  const blocks: string[] = [];
+  let remainingBudget = MAX_KB_CONTEXT_CHARS;
+  const includedHits: KnowledgeBaseHit[] = [];
+
+  for (const entry of selectedEntries) {
+    const block = buildEntryBlock(entry);
+    if (block.length > remainingBudget && blocks.length > 0) break;
+    blocks.push(block);
+    remainingBudget -= block.length;
+    includedHits.push(toKnowledgeBaseHit(entry));
+  }
+
+  if (blocks.length === 0) {
+    return {
+      context: "",
+      hits: [],
+    };
+  }
+
+  return {
+    context: [
+      "以下是从公司知识库中检索出的高相关条目。请优先依据这些条目回答。",
+      "如果这些条目不足以直接支持结论，请明确说明信息还不够，不要编造公司规则。",
+      "不要把 KB 编号、条目 ID 或内部标签原样展示给用户。",
+      "",
+      blocks.join("\n\n---\n\n"),
+    ].join("\n"),
+    hits: includedHits,
+  };
+}
+
+export function buildKnowledgeBaseContext(query: string, role: string): string {
+  return buildKnowledgeBaseRetrieval(query, role).context;
+}
