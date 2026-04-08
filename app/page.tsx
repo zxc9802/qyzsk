@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { DEFAULT_ANSWER_MODE, isAnswerMode, type AnswerMode } from "@/lib/answer-modes";
 import { DEFAULT_CHAT_MODEL_ID, isChatModelId, type ChatModelId } from "@/lib/chat-models";
-import { DEFAULT_KNOWLEDGE_MODE, isKnowledgeMode, type KnowledgeMode } from "@/lib/knowledge-mode";
+import { DEFAULT_KNOWLEDGE_MODE } from "@/lib/knowledge-mode";
 import { DEFAULT_THEME_MODE, isThemeMode, type ThemeMode } from "@/lib/theme";
 import { Conversation, ConversationFile, Message } from "@/lib/types";
 import { ConversationReport } from "@/lib/report";
@@ -55,7 +55,6 @@ export default function Home() {
   const [roleName, setRoleName] = useState<string>("选择岗位");
   const [selectedModelId, setSelectedModelId] = useState<ChatModelId>(DEFAULT_CHAT_MODEL_ID);
   const [selectedAnswerMode, setSelectedAnswerMode] = useState<AnswerMode>(DEFAULT_ANSWER_MODE);
-  const [selectedKnowledgeMode, setSelectedKnowledgeMode] = useState<KnowledgeMode>(DEFAULT_KNOWLEDGE_MODE);
   const [themeMode, setThemeMode] = useState<ThemeMode>(DEFAULT_THEME_MODE);
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -82,9 +81,6 @@ export default function Home() {
       if (settings.answerMode && isAnswerMode(settings.answerMode)) {
         setSelectedAnswerMode(settings.answerMode);
       }
-      if (settings.knowledgeMode && isKnowledgeMode(settings.knowledgeMode)) {
-        setSelectedKnowledgeMode(settings.knowledgeMode);
-      }
       if (settings.themeMode && isThemeMode(settings.themeMode)) {
         setThemeMode(settings.themeMode);
       }
@@ -108,11 +104,11 @@ export default function Home() {
         roleName,
         chatModelId: selectedModelId,
         answerMode: selectedAnswerMode,
-        knowledgeMode: selectedKnowledgeMode,
+        knowledgeMode: DEFAULT_KNOWLEDGE_MODE,
         themeMode,
       });
     }
-  }, [mounted, role, roleName, selectedModelId, selectedAnswerMode, selectedKnowledgeMode, themeMode]);
+  }, [mounted, role, roleName, selectedModelId, selectedAnswerMode, themeMode]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -386,7 +382,7 @@ export default function Home() {
           history,
           modelId: selectedModelId,
           answerMode: selectedAnswerMode,
-          knowledgeMode: selectedKnowledgeMode,
+          knowledgeMode: DEFAULT_KNOWLEDGE_MODE,
         }),
       });
 
@@ -460,7 +456,7 @@ export default function Home() {
     } finally {
       setIsStreaming(false);
     }
-  }, [ensureConversationContext, isStreaming, role, selectedModelId, selectedAnswerMode, selectedKnowledgeMode]);
+  }, [ensureConversationContext, isStreaming, role, selectedModelId, selectedAnswerMode]);
 
   const handleGenerateReport = useCallback(async () => {
     if (!activeConvo || isGeneratingReport || isStreaming) return;
@@ -571,8 +567,6 @@ export default function Home() {
             onModelChange={setSelectedModelId}
             selectedAnswerMode={selectedAnswerMode}
             onAnswerModeChange={setSelectedAnswerMode}
-            selectedKnowledgeMode={selectedKnowledgeMode}
-            onKnowledgeModeChange={setSelectedKnowledgeMode}
             themeMode={themeMode}
             onThemeToggle={() => setThemeMode((prev) => (prev === "dark" ? "light" : "dark"))}
             roleName={roleName}

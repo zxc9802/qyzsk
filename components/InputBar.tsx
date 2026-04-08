@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { AnswerMode } from "@/lib/answer-modes";
+import { ANSWER_MODES, AnswerMode } from "@/lib/answer-modes";
 import { CHAT_MODELS, ChatModelId } from "@/lib/chat-models";
-import { KNOWLEDGE_MODES, KnowledgeMode } from "@/lib/knowledge-mode";
 import { ConversationFile } from "@/lib/types";
 import ConversationFiles from "./ConversationFiles";
 
@@ -17,8 +16,6 @@ interface InputBarProps {
   onModelChange: (modelId: ChatModelId) => void;
   selectedAnswerMode: AnswerMode;
   onAnswerModeChange: (mode: AnswerMode) => void;
-  selectedKnowledgeMode: KnowledgeMode;
-  onKnowledgeModeChange: (mode: KnowledgeMode) => void;
   disabled?: boolean;
   isUploading?: boolean;
   uploadStatus?: string | null;
@@ -32,8 +29,8 @@ export default function InputBar({
   onDeleteFile,
   selectedModelId,
   onModelChange,
-  selectedKnowledgeMode,
-  onKnowledgeModeChange,
+  selectedAnswerMode,
+  onAnswerModeChange,
   disabled = false,
   isUploading = false,
   uploadStatus,
@@ -115,12 +112,12 @@ export default function InputBar({
           </div>
           <div className="relative">
             <select
-              value={selectedKnowledgeMode}
-              onChange={(e) => onKnowledgeModeChange(e.target.value as KnowledgeMode)}
+              value={selectedAnswerMode}
+              onChange={(e) => onAnswerModeChange(e.target.value as AnswerMode)}
               className="command-select pr-9 text-[13px] cursor-pointer"
-              title="选择知识检索策略"
+              title="选择回答深度"
             >
-              {KNOWLEDGE_MODES.map((mode) => (
+              {ANSWER_MODES.map((mode) => (
                 <option key={mode.id} value={mode.id}>
                   {mode.label}
                 </option>

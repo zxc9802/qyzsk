@@ -3,7 +3,6 @@
 import { useRef, useEffect } from "react";
 import { AnswerMode } from "@/lib/answer-modes";
 import { ChatModelId } from "@/lib/chat-models";
-import { KnowledgeMode } from "@/lib/knowledge-mode";
 import { ThemeMode } from "@/lib/theme";
 import { ConversationFile, Message } from "@/lib/types";
 import MessageBubble from "./MessageBubble";
@@ -25,8 +24,6 @@ interface ChatAreaProps {
   onModelChange: (modelId: ChatModelId) => void;
   selectedAnswerMode: AnswerMode;
   onAnswerModeChange: (mode: AnswerMode) => void;
-  selectedKnowledgeMode: KnowledgeMode;
-  onKnowledgeModeChange: (mode: KnowledgeMode) => void;
   themeMode: ThemeMode;
   onThemeToggle: () => void;
   roleName: string;
@@ -50,8 +47,6 @@ export default function ChatArea({
   onModelChange,
   selectedAnswerMode,
   onAnswerModeChange,
-  selectedKnowledgeMode,
-  onKnowledgeModeChange,
   themeMode,
   onThemeToggle,
   roleName,
@@ -163,8 +158,6 @@ export default function ChatArea({
         onModelChange={onModelChange}
         selectedAnswerMode={selectedAnswerMode}
         onAnswerModeChange={onAnswerModeChange}
-        selectedKnowledgeMode={selectedKnowledgeMode}
-        onKnowledgeModeChange={onKnowledgeModeChange}
         disabled={isStreaming}
         isUploading={isUploading}
         uploadStatus={uploadStatus}
