@@ -18,9 +18,36 @@ export async function proxy(request: NextRequest) {
   }
 
   const { pathname, searchParams } = request.nextUrl;
+  const requestedMainAppUrl = resolveRequestedMainAppUrl(request);
+  const ticket = searchParams.get("ticket")?.trim();
 
   if (shouldBypassSso(pathname)) {
     return NextResponse.next();
+  }
+
+  if (ticket && !pathname.startsWith("/api/")) {
+    try {
+      const exchangeResult = await exchangeMainAppSsoTicket(ticket, requestedMainAppUrl);
+      const redirectUrl = new URL(exchangeResult.redirectPath, request.url);
+      redirectUrl.searchParams.delete("ticket");
+      redirectUrl.searchParams.delete("mainApp");
+
+      const response = NextResponse.redirect(redirectUrl, 302);
+      response.cookies.set(
+        buildSessionCookie({
+          token: exchangeResult.token,
+          user: exchangeResult.user,
+          mainAppUrl: requestedMainAppUrl,
+        })
+      );
+      return response;
+    } catch (error) {
+      console.error("[kb-chat-sso] Ticket exchange failed:", error);
+
+      const response = NextResponse.redirect(buildMainAppEntryUrl(requestedMainAppUrl), 302);
+      response.cookies.set(buildClearedSessionCookie());
+      return response;
+    }
   }
 
   const session = readAppSession(request);
@@ -47,35 +74,11 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const requestedMainAppUrl = resolveRequestedMainAppUrl(request);
-  const ticket = searchParams.get("ticket")?.trim();
-
   if (!ticket) {
     return NextResponse.redirect(buildMainAppEntryUrl(requestedMainAppUrl), 302);
   }
 
-  try {
-    const exchangeResult = await exchangeMainAppSsoTicket(ticket, requestedMainAppUrl);
-    const redirectUrl = new URL(exchangeResult.redirectPath, request.url);
-    redirectUrl.searchParams.delete("ticket");
-    redirectUrl.searchParams.delete("mainApp");
-
-    const response = NextResponse.redirect(redirectUrl, 302);
-    response.cookies.set(
-      buildSessionCookie({
-        token: exchangeResult.token,
-        user: exchangeResult.user,
-        mainAppUrl: requestedMainAppUrl,
-      })
-    );
-    return response;
-  } catch (error) {
-    console.error("[kb-chat-sso] Ticket exchange failed:", error);
-
-    const response = NextResponse.redirect(buildMainAppEntryUrl(requestedMainAppUrl), 302);
-    response.cookies.set(buildClearedSessionCookie());
-    return response;
-  }
+  return NextResponse.redirect(buildMainAppEntryUrl(requestedMainAppUrl), 302);
 }
 
 export const config = {
