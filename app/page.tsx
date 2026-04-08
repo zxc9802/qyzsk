@@ -8,6 +8,7 @@ import { DEFAULT_THEME_MODE, isThemeMode, type ThemeMode } from "@/lib/theme";
 import { Conversation, ConversationFile, Message } from "@/lib/types";
 import { ConversationReport } from "@/lib/report";
 import { sanitizeAssistantOutput } from "@/lib/sanitize-assistant-output";
+import { extractApiErrorMessage, readJsonSafely, redirectToMainAppIfNeeded } from "@/lib/client/api-response";
 import {
   getSettings, saveSettings,
   getConversations, saveConversations,
@@ -137,11 +138,14 @@ export default function Home() {
   const fetchConversationFiles = useCallback(async (conversationId: string) => {
     try {
       const response = await fetch(`/api/files?conversationId=${encodeURIComponent(conversationId)}`);
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "无法读取资料列表");
+      const data = await readJsonSafely<{ files?: ConversationFile[]; error?: string; message?: string; redirectUrl?: string }>(response);
+      if (redirectToMainAppIfNeeded(response, data)) {
+        return;
       }
-      const files = (data.files || []) as ConversationFile[];
+      if (!response.ok) {
+        throw new Error(extractApiErrorMessage(data, "无法读取资料列表"));
+      }
+      const files = (data?.files || []) as ConversationFile[];
       setConversationFiles((prev) => ({ ...prev, [conversationId]: files }));
       setUploadStatusByConversation((prev) => ({
         ...prev,
@@ -260,12 +264,15 @@ export default function Home() {
         body: formData,
       });
 
-      const data = await response.json();
+      const data = await readJsonSafely<{ files?: ConversationFile[]; error?: string; message?: string; redirectUrl?: string }>(response);
+      if (redirectToMainAppIfNeeded(response, data)) {
+        return;
+      }
       if (!response.ok) {
-        throw new Error(data.error || "上传失败");
+        throw new Error(extractApiErrorMessage(data, "上传失败"));
       }
 
-      const updatedFiles = (data.files || []) as ConversationFile[];
+      const updatedFiles = (data?.files || []) as ConversationFile[];
       setConversationFiles((prev) => ({ ...prev, [conversationId]: updatedFiles }));
       setUploadStatusByConversation((prev) => ({
         ...prev,
@@ -293,12 +300,15 @@ export default function Home() {
         }),
       });
 
-      const data = await response.json();
+      const data = await readJsonSafely<{ files?: ConversationFile[]; error?: string; message?: string; redirectUrl?: string }>(response);
+      if (redirectToMainAppIfNeeded(response, data)) {
+        return;
+      }
       if (!response.ok) {
-        throw new Error(data.error || "更新文件状态失败");
+        throw new Error(extractApiErrorMessage(data, "更新文件状态失败"));
       }
 
-      setConversationFiles((prev) => ({ ...prev, [activeId]: data.files || [] }));
+      setConversationFiles((prev) => ({ ...prev, [activeId]: data?.files || [] }));
       setUploadStatusByConversation((prev) => ({
         ...prev,
         [activeId]: nextActive ? "文件已加入当前参考范围。" : "文件已移出当前参考范围。",
@@ -318,12 +328,15 @@ export default function Home() {
         { method: "DELETE" }
       );
 
-      const data = await response.json();
+      const data = await readJsonSafely<{ files?: ConversationFile[]; error?: string; message?: string; redirectUrl?: string }>(response);
+      if (redirectToMainAppIfNeeded(response, data)) {
+        return;
+      }
       if (!response.ok) {
-        throw new Error(data.error || "删除文件失败");
+        throw new Error(extractApiErrorMessage(data, "删除文件失败"));
       }
 
-      const updatedFiles = (data.files || []) as ConversationFile[];
+      const updatedFiles = (data?.files || []) as ConversationFile[];
       setConversationFiles((prev) => ({ ...prev, [activeId]: updatedFiles }));
       setUploadStatusByConversation((prev) => ({
         ...prev,
@@ -386,7 +399,13 @@ export default function Home() {
         }),
       });
 
-      if (!response.ok) throw new Error("API error");
+      if (!response.ok) {
+        const errorPayload = await readJsonSafely(response);
+        if (redirectToMainAppIfNeeded(response, errorPayload)) {
+          return;
+        }
+        throw new Error(extractApiErrorMessage(errorPayload, "请求失败"));
+      }
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -480,12 +499,15 @@ export default function Home() {
         }),
       });
 
-      const data = await response.json();
+      const data = await readJsonSafely<{ report?: ConversationReport; error?: string; message?: string; redirectUrl?: string }>(response);
+      if (redirectToMainAppIfNeeded(response, data)) {
+        return;
+      }
       if (!response.ok) {
-        throw new Error(data.error || "生成报告失败");
+        throw new Error(extractApiErrorMessage(data, "生成报告失败"));
       }
 
-      setActiveReport(data.report as ConversationReport);
+      setActiveReport(data?.report as ConversationReport);
     } catch (error) {
       const message = error instanceof Error ? error.message : "生成报告失败，请稍后再试。";
       setReportError(message);

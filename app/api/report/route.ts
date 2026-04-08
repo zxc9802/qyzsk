@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import type { ReportGenerationRequest } from "@/lib/report";
+import { appSessionErrorResponse, assertAppSession } from "@/lib/server/app-session";
 import { buildConversationReport } from "@/lib/server/report-builder";
 
 export const runtime = "nodejs";
@@ -34,6 +35,12 @@ function isValidReportRequest(body: unknown): body is ReportGenerationRequest {
 
 export async function POST(req: NextRequest) {
   try {
+    try {
+      await assertAppSession(req);
+    } catch (error) {
+      return appSessionErrorResponse(error, req);
+    }
+
     const body = await req.json();
 
     if (!isValidReportRequest(body)) {

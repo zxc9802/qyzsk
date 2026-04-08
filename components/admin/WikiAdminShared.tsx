@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CHAT_MODELS, DEFAULT_CHAT_MODEL_ID, type ChatModelId } from "@/lib/chat-models";
+import { extractApiErrorMessage, readJsonSafely, redirectToMainAppIfNeeded } from "@/lib/client/api-response";
 import type { WikiCategory, WikiDraft, WikiPage, WikiSourceRecord, WikiStats } from "@/lib/wiki-types";
 
 export type OverviewPayload = {
@@ -94,9 +95,13 @@ export function useWikiAdminOverview() {
         },
       });
 
-      const payload = await response.json();
+      const payload = await readJsonSafely<T & { error?: string; message?: string; redirectUrl?: string }>(response);
+      if (redirectToMainAppIfNeeded(response, payload)) {
+        throw new Error("登录已失效，正在返回主站...");
+      }
+
       if (!response.ok) {
-        throw new Error(payload.error || "请求失败");
+        throw new Error(extractApiErrorMessage(payload, "请求失败"));
       }
 
       return payload as T;

@@ -43,6 +43,45 @@ The chat route now supports two knowledge strategies:
 
 The assistant UI also shows which `Wiki / KB / 资料` sources were used for each answer.
 
+### Main Site SSO
+
+This project can now be mounted as a protected bot behind your main website login flow, similar to the `seedance-main` project.
+
+Add the following env vars before deploying:
+
+```bash
+MAIN_APP_URL=https://your-main-site.example.com
+MAIN_APP_KB_CHAT_ENTRY_PATH=/bot/kb-chat
+MAIN_APP_KB_CHAT_SSO_EXCHANGE_PATH=/api/kb-chat-sso/exchange
+REQUIRE_MAIN_APP_SSO=true
+KB_CHAT_SESSION_SECRET=replace-with-a-long-random-secret
+```
+
+Behavior:
+
+- direct visits to this app will be redirected to `MAIN_APP_URL + MAIN_APP_KB_CHAT_ENTRY_PATH`
+- after the main site authenticates the user, it should redirect back to this app with a `ticket` query param
+- this app exchanges that `ticket` against `MAIN_APP_KB_CHAT_SSO_EXCHANGE_PATH`, writes its own signed session cookie, then redirects to the returned `redirectPath`
+- if the session expires, API calls return `401` with `redirectUrl`, and the frontend sends the user back to the main site automatically
+
+Expected exchange response from the main site:
+
+```json
+{
+  "success": true,
+  "data": {
+    "token": "signed-or-random-session-token",
+    "user": {
+      "id": "u_123",
+      "account": "demo",
+      "email": "demo@example.com",
+      "nickname": "Demo User"
+    },
+    "redirectPath": "/"
+  }
+}
+```
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More

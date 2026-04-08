@@ -17,6 +17,7 @@ import {
   cancelFileProcessing,
   enqueueFileProcessingJobs,
 } from "@/lib/server/processing-queue";
+import { appSessionErrorResponse, assertAppSession } from "@/lib/server/app-session";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -52,6 +53,12 @@ function normalizeMimeType(file: File): string {
 }
 
 export async function GET(req: NextRequest) {
+  try {
+    await assertAppSession(req);
+  } catch (error) {
+    return appSessionErrorResponse(error, req);
+  }
+
   const conversationId = getConversationId(req);
   if (!conversationId) {
     return json({ error: "Missing conversationId" }, 400);
@@ -62,6 +69,12 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    await assertAppSession(req);
+  } catch (error) {
+    return appSessionErrorResponse(error, req);
+  }
+
   const formData = await req.formData();
   const conversationId = String(formData.get("conversationId") || "").trim();
 
@@ -120,6 +133,12 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  try {
+    await assertAppSession(req);
+  } catch (error) {
+    return appSessionErrorResponse(error, req);
+  }
+
   const { conversationId, fileId, active } = await req.json();
 
   if (!conversationId || !fileId || typeof active !== "boolean") {
@@ -131,6 +150,12 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  try {
+    await assertAppSession(req);
+  } catch (error) {
+    return appSessionErrorResponse(error, req);
+  }
+
   const conversationId = getConversationId(req);
   if (!conversationId) {
     return json({ error: "Missing conversationId" }, 400);

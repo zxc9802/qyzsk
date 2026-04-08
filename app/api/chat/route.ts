@@ -13,6 +13,7 @@ import {
   parseModelDiagnosisResult,
   type DiagnosisHistoryMessage,
 } from "@/lib/server/question-diagnosis";
+import { appSessionErrorResponse, assertAppSession } from "@/lib/server/app-session";
 import type { QuestionDiagnosis } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -253,6 +254,12 @@ function readUpstreamError(text: string): UpstreamErrorDetails {
 
 export async function POST(req: NextRequest) {
   try {
+    try {
+      await assertAppSession(req);
+    } catch (error) {
+      return appSessionErrorResponse(error, req);
+    }
+
     const { message, role, history, conversationId, modelId, answerMode, knowledgeMode } = await req.json();
 
     if (!message || typeof message !== "string") {
