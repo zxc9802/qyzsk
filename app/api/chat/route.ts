@@ -13,7 +13,11 @@ import {
   parseModelDiagnosisResult,
   type DiagnosisHistoryMessage,
 } from "@/lib/server/question-diagnosis";
-import { appSessionErrorResponse, assertAppSession } from "@/lib/server/app-session";
+import {
+  appSessionErrorResponse,
+  assertAppUserSession,
+} from "@/lib/server/app-session";
+import { ensureConversationRecord } from "@/lib/server/chat-state-store";
 import type { QuestionDiagnosis } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -254,8 +258,9 @@ function readUpstreamError(text: string): UpstreamErrorDetails {
 
 export async function POST(req: NextRequest) {
   try {
+    let userId = "";
     try {
-      await assertAppSession(req);
+      ({ userId } = await assertAppUserSession(req));
     } catch (error) {
       return appSessionErrorResponse(error, req);
     }
@@ -264,6 +269,10 @@ export async function POST(req: NextRequest) {
 
     if (!message || typeof message !== "string") {
       return createJsonResponse({ error: "Missing message" }, 400);
+    }
+
+    if (typeof conversationId === "string" && conversationId.trim()) {
+      await ensureConversationRecord(userId, conversationId, message);
     }
 
     const resolvedModelId =
@@ -283,7 +292,7 @@ export async function POST(req: NextRequest) {
     const recentHistory = normalizeHistory(history);
     const mediaContext =
       typeof conversationId === "string" && conversationId
-        ? await buildConversationMediaContext(conversationId)
+        ? await buildConversationMediaContext(userId, conversationId)
         : { hasMedia: false, geminiParts: [], openAIParts: [] };
     let diagnosis: QuestionDiagnosis | undefined;
     let clarificationReply: string | undefined;
@@ -291,7 +300,7 @@ export async function POST(req: NextRequest) {
     if (resolvedAnswerMode === "deep") {
       const diagnosisFileContext =
         typeof conversationId === "string" && conversationId
-          ? await buildConversationFileDiagnosisContext(conversationId, message)
+          ? await buildConversationFileDiagnosisContext(userId, conversationId, message)
           : "";
       const fallbackDiagnosisResult = diagnoseQuestion(message, role || "new", recentHistory as DiagnosisHistoryMessage[]);
       let diagnosisResult = fallbackDiagnosisResult;
@@ -357,6 +366,7 @@ export async function POST(req: NextRequest) {
     const retrieval = await buildRetrievalOrchestratorResult({
       query: message,
       role: role || "new",
+      userId,
       conversationId: typeof conversationId === "string" ? conversationId : undefined,
       history: recentHistory,
       diagnosis,

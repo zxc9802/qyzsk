@@ -99,7 +99,7 @@ export async function processUploadedFile(
     return persisted ?? processed.record;
   } catch (error) {
     const message = error instanceof Error ? error.message : "文件处理失败";
-    const latestRecord = await getFileRecord(record.conversationId, record.id);
+    const latestRecord = await getFileRecord(record.userId, record.conversationId, record.id);
     if (!latestRecord) {
       return {
         ...record,
@@ -118,7 +118,7 @@ export async function processUploadedFile(
       updatedAt: Date.now(),
     };
     await saveFileRecord(failedRecord);
-    await saveFileSegments(record.conversationId, record.id, []);
+    await saveFileSegments(record.userId, record.conversationId, record.id, []);
     return failedRecord;
   }
 }
@@ -128,7 +128,7 @@ async function persistProcessedFile(
   processedRecord: ConversationFileRecord,
   segments: FileSegment[]
 ): Promise<ConversationFileRecord | null> {
-  const latestRecord = await getFileRecord(originalRecord.conversationId, originalRecord.id);
+  const latestRecord = await getFileRecord(originalRecord.userId, originalRecord.conversationId, originalRecord.id);
   if (!latestRecord) return null;
 
   const mergedRecord: ConversationFileRecord = {
@@ -139,7 +139,7 @@ async function persistProcessedFile(
   };
 
   await saveFileRecord(mergedRecord);
-  await saveFileSegments(originalRecord.conversationId, originalRecord.id, segments);
+  await saveFileSegments(originalRecord.userId, originalRecord.conversationId, originalRecord.id, segments);
   return mergedRecord;
 }
 

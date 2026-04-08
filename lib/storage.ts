@@ -1,40 +1,7 @@
-import { Conversation, UserSettings, Message } from "./types";
-
-const CONVERSATIONS_KEY = "kb-chat-conversations";
-const SETTINGS_KEY = "kb-chat-settings";
-const ACTIVE_KEY = "kb-chat-active";
+import { Conversation, Message } from "./types";
 
 export function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-}
-
-export function getSettings(): UserSettings | null {
-  if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(SETTINGS_KEY);
-  return raw ? JSON.parse(raw) : null;
-}
-
-export function saveSettings(settings: UserSettings): void {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-}
-
-export function getConversations(): Conversation[] {
-  if (typeof window === "undefined") return [];
-  const raw = localStorage.getItem(CONVERSATIONS_KEY);
-  return raw ? JSON.parse(raw) : [];
-}
-
-export function saveConversations(convos: Conversation[]): void {
-  localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(convos));
-}
-
-export function getActiveId(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(ACTIVE_KEY);
-}
-
-export function saveActiveId(id: string): void {
-  localStorage.setItem(ACTIVE_KEY, id);
 }
 
 export function createConversation(): Conversation {

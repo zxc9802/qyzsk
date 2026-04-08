@@ -19,9 +19,10 @@ export interface ConversationMediaContext {
 }
 
 export async function buildConversationMediaContext(
+  userId: string,
   conversationId: string
 ): Promise<ConversationMediaContext> {
-  const mediaFiles = (await listConversationFiles(conversationId))
+  const mediaFiles = (await listConversationFiles(userId, conversationId))
     .filter((file) => file.active && file.status === "ready" && (file.kind === "image" || file.kind === "video"))
     .slice(0, MAX_MEDIA_FILES);
 
@@ -59,7 +60,7 @@ export async function buildConversationMediaContext(
       continue;
     }
 
-    const framePayloads = await loadVideoFramesForModel(conversationId, file.id, file.storagePath);
+    const framePayloads = await loadVideoFramesForModel(userId, conversationId, file.id, file.storagePath);
     if (framePayloads.length === 0) continue;
 
     geminiParts.push({ text: `当前激活视频：${file.name}。以下是按时间顺序抽取的关键帧。` });
@@ -114,6 +115,7 @@ async function loadImageForModel(filePath: string): Promise<{ mimeType: string; 
 }
 
 async function loadVideoFramesForModel(
+  userId: string,
   conversationId: string,
   fileId: string,
   storagePath: string
@@ -123,7 +125,7 @@ async function loadVideoFramesForModel(
   try {
     const [entries, segments] = await Promise.all([
       fs.readdir(frameDir),
-      getFileSegments(conversationId, fileId),
+      getFileSegments(userId, conversationId, fileId),
     ]);
     const frameLabels = segments
       .filter((segment) => segment.segmentType === "frame")

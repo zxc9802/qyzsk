@@ -10,6 +10,7 @@ export type FileSegmentType = "summary" | "page" | "section" | "ocr" | "frame";
 
 export interface ConversationFileRecord {
   id: string;
+  userId: string;
   conversationId: string;
   name: string;
   mimeType: string;
@@ -66,24 +67,30 @@ function sanitizeId(value: string): string {
   return sanitized || "default";
 }
 
-function conversationDir(conversationId: string): string {
-  return path.join(STORAGE_ROOT, "conversations", sanitizeId(conversationId));
+function userConversationDir(userId: string, conversationId: string): string {
+  return path.join(
+    STORAGE_ROOT,
+    "users",
+    sanitizeId(userId),
+    "conversations",
+    sanitizeId(conversationId)
+  );
 }
 
-function filesDir(conversationId: string): string {
-  return path.join(conversationDir(conversationId), "files");
+function filesDir(userId: string, conversationId: string): string {
+  return path.join(userConversationDir(userId, conversationId), "files");
 }
 
-function fileDir(conversationId: string, fileId: string): string {
-  return path.join(filesDir(conversationId), sanitizeId(fileId));
+function fileDir(userId: string, conversationId: string, fileId: string): string {
+  return path.join(filesDir(userId, conversationId), sanitizeId(fileId));
 }
 
-function metaPath(conversationId: string, fileId: string): string {
-  return path.join(fileDir(conversationId, fileId), "meta.json");
+function metaPath(userId: string, conversationId: string, fileId: string): string {
+  return path.join(fileDir(userId, conversationId, fileId), "meta.json");
 }
 
-function segmentsPath(conversationId: string, fileId: string): string {
-  return path.join(fileDir(conversationId, fileId), "segments.json");
+function segmentsPath(userId: string, conversationId: string, fileId: string): string {
+  return path.join(fileDir(userId, conversationId, fileId), "segments.json");
 }
 
 async function ensureDir(dirPath: string) {
@@ -139,6 +146,7 @@ export function inferExtension(fileName: string, mimeType: string): string {
 }
 
 export async function createPendingFileRecord(options: {
+  userId: string;
   conversationId: string;
   fileName: string;
   mimeType: string;
@@ -150,7 +158,7 @@ export async function createPendingFileRecord(options: {
 
   const id = generateServerId();
   const extension = inferExtension(options.fileName, options.mimeType);
-  const dir = fileDir(options.conversationId, id);
+  const dir = fileDir(options.userId, options.conversationId, id);
   const storagePath = path.join(dir, `source${extension}`);
   const now = Date.now();
 
@@ -159,6 +167,7 @@ export async function createPendingFileRecord(options: {
 
   const record: ConversationFileRecord = {
     id,
+    userId: options.userId,
     conversationId: options.conversationId,
     name: options.fileName,
     mimeType: options.mimeType,
@@ -178,29 +187,31 @@ export async function createPendingFileRecord(options: {
   };
 
   await saveFileRecord(record);
-  await enforceActiveFileLimit(options.conversationId, id);
+  await enforceActiveFileLimit(options.userId, options.conversationId, id);
   return record;
 }
 
 export async function saveFileRecord(record: ConversationFileRecord) {
-  await writeJson(metaPath(record.conversationId, record.id), record);
+  await writeJson(metaPath(record.userId, record.conversationId, record.id), record);
 }
 
 export async function getFileRecord(
+  userId: string,
   conversationId: string,
   fileId: string
 ): Promise<ConversationFileRecord | null> {
-  const filePath = metaPath(conversationId, fileId);
+  const filePath = metaPath(userId, conversationId, fileId);
   const result = await readJson<ConversationFileRecord | null>(filePath, null);
   return result;
 }
 
 export async function updateFileRecord(
+  userId: string,
   conversationId: string,
   fileId: string,
   updater: (record: ConversationFileRecord) => ConversationFileRecord
 ): Promise<ConversationFileRecord> {
-  const current = await getFileRecord(conversationId, fileId);
+  const current = await getFileRecord(userId, conversationId, fileId);
   if (!current) {
     throw new Error("File record not found");
   }
@@ -211,31 +222,34 @@ export async function updateFileRecord(
 }
 
 export async function saveFileSegments(
+  userId: string,
   conversationId: string,
   fileId: string,
   segments: FileSegment[]
 ) {
-  await writeJson(segmentsPath(conversationId, fileId), segments);
+  await writeJson(segmentsPath(userId, conversationId, fileId), segments);
 }
 
 export async function getFileSegments(
+  userId: string,
   conversationId: string,
   fileId: string
 ): Promise<FileSegment[]> {
-  return readJson<FileSegment[]>(segmentsPath(conversationId, fileId), []);
+  return readJson<FileSegment[]>(segmentsPath(userId, conversationId, fileId), []);
 }
 
 export async function listConversationFiles(
+  userId: string,
   conversationId: string
 ): Promise<ConversationFileRecord[]> {
-  const dir = filesDir(conversationId);
+  const dir = filesDir(userId, conversationId);
 
   try {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     const records = await Promise.all(
       entries
         .filter((entry) => entry.isDirectory())
-        .map((entry) => getFileRecord(conversationId, entry.name))
+        .map((entry) => getFileRecord(userId, conversationId, entry.name))
     );
 
     return records
@@ -249,11 +263,12 @@ export async function listConversationFiles(
 }
 
 export async function setConversationFileActive(
+  userId: string,
   conversationId: string,
   fileId: string,
   active: boolean
 ): Promise<ConversationFileRecord[]> {
-  const files = await listConversationFiles(conversationId);
+  const files = await listConversationFiles(userId, conversationId);
   const now = Date.now();
 
   await Promise.all(
@@ -264,17 +279,18 @@ export async function setConversationFileActive(
   );
 
   if (active) {
-    await enforceActiveFileLimit(conversationId, fileId);
+    await enforceActiveFileLimit(userId, conversationId, fileId);
   }
 
-  return listConversationFiles(conversationId);
+  return listConversationFiles(userId, conversationId);
 }
 
 export async function enforceActiveFileLimit(
+  userId: string,
   conversationId: string,
   prioritizedFileId?: string
 ) {
-  const files = await listConversationFiles(conversationId);
+  const files = await listConversationFiles(userId, conversationId);
   const activeFiles = files.filter((file) => file.active);
 
   if (activeFiles.length <= MAX_ACTIVE_FILES) return;
@@ -298,15 +314,16 @@ export async function enforceActiveFileLimit(
   );
 }
 
-export async function deleteConversationFiles(conversationId: string) {
-  await fs.rm(conversationDir(conversationId), { recursive: true, force: true });
+export async function deleteConversationFiles(userId: string, conversationId: string) {
+  await fs.rm(userConversationDir(userId, conversationId), { recursive: true, force: true });
 }
 
 export async function deleteConversationFile(
+  userId: string,
   conversationId: string,
   fileId: string
 ): Promise<void> {
-  await fs.rm(fileDir(conversationId, fileId), { recursive: true, force: true });
+  await fs.rm(fileDir(userId, conversationId, fileId), { recursive: true, force: true });
 }
 
 export function toClientConversationFile(

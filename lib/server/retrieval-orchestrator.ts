@@ -163,6 +163,7 @@ function backfillKnowledgeBaseEntries(query: string, role: string, pages: WikiPa
 export async function buildRetrievalOrchestratorResult(options: {
   query: string;
   role: string;
+  userId?: string;
   conversationId?: string;
   history?: RetrievalHistoryMessage[];
   diagnosis?: QuestionDiagnosis;
@@ -193,8 +194,8 @@ export async function buildRetrievalOrchestratorResult(options: {
   const kbHits: KnowledgeBaseHit[] = kbEntries.map(toKnowledgeBaseHit);
 
   const fileRetrieval =
-    options.conversationId && options.conversationId.trim()
-      ? await buildConversationFileRetrieval(options.conversationId, retrievalQuery)
+    options.userId && options.conversationId && options.conversationId.trim()
+      ? await buildConversationFileRetrieval(options.userId, options.conversationId, retrievalQuery)
       : { context: "", hits: [] as RetrievalSourceHit[] };
 
   const knowledgeSegments = [wikiContext, kbContext].filter(Boolean);

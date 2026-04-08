@@ -9,20 +9,22 @@ const MAX_SEGMENTS_PER_FILE_IN_DIAGNOSIS = 1;
 const MAX_DIAGNOSIS_CONTEXT_CHARS = 2800;
 
 export async function buildConversationFileContext(
+  userId: string,
   conversationId: string,
   query: string
 ): Promise<string> {
-  return (await buildConversationFileRetrieval(conversationId, query)).context;
+  return (await buildConversationFileRetrieval(userId, conversationId, query)).context;
 }
 
 export async function buildConversationFileRetrieval(
+  userId: string,
   conversationId: string,
   query: string
 ): Promise<{
   context: string;
   hits: RetrievalSourceHit[];
 }> {
-  const activeFiles = (await listConversationFiles(conversationId))
+  const activeFiles = (await listConversationFiles(userId, conversationId))
     .filter((file) => file.active && file.status === "ready")
     .slice(0, MAX_FILES_IN_CONTEXT);
 
@@ -39,7 +41,7 @@ export async function buildConversationFileRetrieval(
   let budget = MAX_CONTEXT_CHARS;
 
   for (const file of activeFiles) {
-    const segments = await getFileSegments(conversationId, file.id);
+    const segments = await getFileSegments(userId, conversationId, file.id);
     const selectedSegments = selectRelevantSegments(segments, terms).slice(0, MAX_SEGMENTS_PER_FILE);
 
     const lines = [
@@ -86,10 +88,11 @@ export async function buildConversationFileRetrieval(
 }
 
 export async function buildConversationFileDiagnosisContext(
+  userId: string,
   conversationId: string,
   query: string
 ): Promise<string> {
-  const activeFiles = (await listConversationFiles(conversationId))
+  const activeFiles = (await listConversationFiles(userId, conversationId))
     .filter((file) => file.active && file.status === "ready")
     .slice(0, MAX_FILES_IN_DIAGNOSIS);
 
@@ -100,7 +103,7 @@ export async function buildConversationFileDiagnosisContext(
   let budget = MAX_DIAGNOSIS_CONTEXT_CHARS;
 
   for (const file of activeFiles) {
-    const segments = await getFileSegments(conversationId, file.id);
+    const segments = await getFileSegments(userId, conversationId, file.id);
     const selectedSegments = selectRelevantSegments(segments, terms).slice(0, MAX_SEGMENTS_PER_FILE_IN_DIAGNOSIS);
     const lines = [
       `文件名称：${file.name}`,

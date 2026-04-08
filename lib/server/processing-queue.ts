@@ -9,6 +9,7 @@ const MAX_CONCURRENT_JOBS = 2;
 const MAX_VIDEO_JOBS = 1;
 
 type ProcessingJob = {
+  userId: string;
   conversationId: string;
   fileId: string;
   kind: FileKind;
@@ -71,7 +72,7 @@ async function runJob(job: ProcessingJob) {
   try {
     if (cancelledJobIds.has(job.fileId)) return;
 
-    const latestRecord = await getFileRecord(job.conversationId, job.fileId);
+    const latestRecord = await getFileRecord(job.userId, job.conversationId, job.fileId);
     if (!latestRecord || latestRecord.status !== "processing") return;
 
     await processUploadedFile(latestRecord);
@@ -91,7 +92,8 @@ async function enqueueRecord(record: ConversationFileRecord | null) {
   if (!record || record.status !== "processing") return;
   if (queuedJobIds.has(record.id) || runningJobs.has(record.id)) return;
 
-  pendingJobs.push({
+    pendingJobs.push({
+    userId: record.userId,
     conversationId: record.conversationId,
     fileId: record.id,
     kind: record.kind,
@@ -100,11 +102,12 @@ async function enqueueRecord(record: ConversationFileRecord | null) {
 }
 
 export async function enqueueFileProcessingJobs(
+  userId: string,
   conversationId: string,
   fileIds: string[]
 ): Promise<void> {
   for (const fileId of fileIds) {
-    const record = await getFileRecord(conversationId, fileId);
+    const record = await getFileRecord(userId, conversationId, fileId);
     await enqueueRecord(record);
   }
 
@@ -125,13 +128,15 @@ export function cancelFileProcessing(fileId: string) {
   }
 }
 
-export function cancelConversationProcessing(conversationId: string) {
+export function cancelConversationProcessing(userId: string, conversationId: string) {
   const removedIds = pendingJobs
-    .filter((job) => job.conversationId === conversationId)
+    .filter((job) => job.userId === userId && job.conversationId === conversationId)
     .map((job) => job.fileId);
 
   if (removedIds.length > 0) {
-    const nextPendingJobs = pendingJobs.filter((job) => job.conversationId !== conversationId);
+    const nextPendingJobs = pendingJobs.filter(
+      (job) => job.userId !== userId || job.conversationId !== conversationId
+    );
     pendingJobs.splice(0, pendingJobs.length, ...nextPendingJobs);
     removedIds.forEach((fileId) => {
       queuedJobIds.delete(fileId);
@@ -139,7 +144,7 @@ export function cancelConversationProcessing(conversationId: string) {
   }
 
   for (const [fileId, job] of runningJobs.entries()) {
-    if (job.conversationId === conversationId) {
+    if (job.userId === userId && job.conversationId === conversationId) {
       cancelledJobIds.add(fileId);
     }
   }

@@ -380,3 +380,32 @@ export function buildPublicSessionData(session: AppSession) {
     expiresAt: new Date(session.expiresAt).toISOString(),
   };
 }
+
+export function getAppSessionUserId(session: AppSession | null) {
+  const userId = typeof session?.user?.id === "string" ? session.user.id.trim() : "";
+  return userId || null;
+}
+
+export async function assertAppUserSession(request: Pick<Request, "url" | "headers">) {
+  const session = await assertAppSession(request);
+  const userId = getAppSessionUserId(session);
+
+  if (userId) {
+    return {
+      session,
+      userId,
+    };
+  }
+
+  if (!isMainAppSsoRequired()) {
+    return {
+      session,
+      userId: "kb-chat-local-dev-user",
+    };
+  }
+
+  throw new AppSessionUnauthorizedError(
+    buildMainAppEntryUrl(resolveRequestedMainAppUrl(request)),
+    "主站会话缺少有效的用户信息，请重新从官网进入机器人。"
+  );
+}

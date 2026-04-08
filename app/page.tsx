@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { DEFAULT_ANSWER_MODE, isAnswerMode, type AnswerMode } from "@/lib/answer-modes";
+import type { ChatStatePayload } from "@/lib/chat-state";
 import { DEFAULT_CHAT_MODEL_ID, isChatModelId, type ChatModelId } from "@/lib/chat-models";
 import { DEFAULT_KNOWLEDGE_MODE } from "@/lib/knowledge-mode";
 import { DEFAULT_THEME_MODE, isThemeMode, type ThemeMode } from "@/lib/theme";
@@ -10,9 +11,6 @@ import { ConversationReport } from "@/lib/report";
 import { sanitizeAssistantOutput } from "@/lib/sanitize-assistant-output";
 import { extractApiErrorMessage, readJsonSafely, redirectToMainAppIfNeeded } from "@/lib/client/api-response";
 import {
-  getSettings, saveSettings,
-  getConversations, saveConversations,
-  getActiveId, saveActiveId,
   createConversation, addMessage, updateLastAssistantMessage, deleteConversation,
   generateId,
 } from "@/lib/storage";
@@ -24,6 +22,13 @@ import ReportPreviewModal from "@/components/ReportPreviewModal";
 type FileMap = Record<string, ConversationFile[]>;
 type UploadFlagMap = Record<string, boolean>;
 type UploadStatusMap = Record<string, string | null>;
+type StateResponsePayload = {
+  success?: boolean;
+  data?: ChatStatePayload;
+  error?: string;
+  message?: string;
+  redirectUrl?: string;
+};
 
 function hasProcessingFiles(files: ConversationFile[]): boolean {
   return files.some((file) => file.status === "processing");
@@ -60,6 +65,7 @@ export default function Home() {
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [stateReady, setStateReady] = useState(false);
   const [conversationFiles, setConversationFiles] = useState<FileMap>({});
   const [uploadingByConversation, setUploadingByConversation] = useState<UploadFlagMap>({});
   const [uploadStatusByConversation, setUploadStatusByConversation] = useState<UploadStatusMap>({});
@@ -68,61 +74,147 @@ export default function Home() {
   const [reportError, setReportError] = useState<string | null>(null);
   const [activeReport, setActiveReport] = useState<ConversationReport | null>(null);
 
-  useEffect(() => {
-    const settings = getSettings();
-    const convos = getConversations();
-    const savedActiveId = getActiveId();
+  const persistState = useCallback(async (payload: ChatStatePayload) => {
+    try {
+      const response = await fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          clientUpdatedAt: Date.now(),
+        }),
+      });
 
-    if (settings) {
-      setRole(settings.role);
-      setRoleName(settings.roleName);
-      if (settings.chatModelId && isChatModelId(settings.chatModelId)) {
-        setSelectedModelId(settings.chatModelId);
+      const data = await readJsonSafely<StateResponsePayload>(response);
+      if (redirectToMainAppIfNeeded(response, data)) {
+        return;
       }
-      if (settings.answerMode && isAnswerMode(settings.answerMode)) {
-        setSelectedAnswerMode(settings.answerMode);
-      }
-      if (settings.themeMode && isThemeMode(settings.themeMode)) {
-        setThemeMode(settings.themeMode);
-      }
-    } else {
-      setShowRoleModal(true);
-    }
 
-    setConversations(convos);
-    if (savedActiveId && convos.some((c) => c.id === savedActiveId)) {
-      setActiveId(savedActiveId);
-    } else if (convos.length > 0) {
-      setActiveId(convos[0].id);
+      if (!response.ok) {
+        throw new Error(extractApiErrorMessage(data, "保存聊天状态失败"));
+      }
+    } catch (error) {
+      console.error("State save error:", error);
     }
-    setMounted(true);
   }, []);
 
   useEffect(() => {
-    if (mounted && role) {
-      saveSettings({
-        role,
-        roleName,
-        chatModelId: selectedModelId,
-        answerMode: selectedAnswerMode,
-        knowledgeMode: DEFAULT_KNOWLEDGE_MODE,
-        themeMode,
-      });
+    let cancelled = false;
+
+    async function bootstrapState() {
+      try {
+        const response = await fetch("/api/state", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const data = await readJsonSafely<StateResponsePayload>(response);
+
+        if (redirectToMainAppIfNeeded(response, data)) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(extractApiErrorMessage(data, "无法读取聊天状态"));
+        }
+
+        if (cancelled) return;
+
+        const state = data?.data;
+        const settings = state?.settings || null;
+        const loadedConversations = state?.conversations || [];
+        const loadedActiveId = state?.activeId && loadedConversations.some((conversation) => conversation.id === state.activeId)
+          ? state.activeId
+          : loadedConversations[0]?.id ?? null;
+
+        setConversations(loadedConversations);
+        setActiveId(loadedActiveId);
+        setConversationFiles({});
+        setUploadingByConversation({});
+        setUploadStatusByConversation({});
+        setStateReady(true);
+
+        if (settings) {
+          setRole(settings.role);
+          setRoleName(settings.roleName);
+          if (settings.chatModelId && isChatModelId(settings.chatModelId)) {
+            setSelectedModelId(settings.chatModelId);
+          }
+          if (settings.answerMode && isAnswerMode(settings.answerMode)) {
+            setSelectedAnswerMode(settings.answerMode);
+          }
+          if (settings.themeMode && isThemeMode(settings.themeMode)) {
+            setThemeMode(settings.themeMode);
+          }
+          setShowRoleModal(false);
+        } else {
+          setRole(null);
+          setRoleName("选择岗位");
+          setSelectedModelId(DEFAULT_CHAT_MODEL_ID);
+          setSelectedAnswerMode(DEFAULT_ANSWER_MODE);
+          setThemeMode(DEFAULT_THEME_MODE);
+          setShowRoleModal(true);
+        }
+      } catch (error) {
+        console.error("State bootstrap error:", error);
+        if (!cancelled) {
+          setShowRoleModal(true);
+        }
+      } finally {
+        if (!cancelled) {
+          setMounted(true);
+        }
+      }
     }
-  }, [mounted, role, roleName, selectedModelId, selectedAnswerMode, themeMode]);
+
+    void bootstrapState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || !stateReady) return;
     document.documentElement.dataset.theme = themeMode;
-  }, [mounted, themeMode]);
+  }, [mounted, stateReady, themeMode]);
 
   useEffect(() => {
-    if (mounted) saveConversations(conversations);
-  }, [conversations, mounted]);
+    if (!mounted || !stateReady) return;
 
-  useEffect(() => {
-    if (mounted && activeId) saveActiveId(activeId);
-  }, [activeId, mounted]);
+    const timeoutId = window.setTimeout(() => {
+      const persistedActiveId = activeId && conversations.some((conversation) => conversation.id === activeId)
+        ? activeId
+        : conversations[0]?.id ?? null;
+
+      void persistState({
+        conversations,
+        activeId: persistedActiveId,
+        settings: role
+          ? {
+              role,
+              roleName,
+              chatModelId: selectedModelId,
+              answerMode: selectedAnswerMode,
+              knowledgeMode: DEFAULT_KNOWLEDGE_MODE,
+              themeMode,
+            }
+          : null,
+      });
+    }, 700);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    activeId,
+    conversations,
+    mounted,
+    persistState,
+    role,
+    roleName,
+    selectedAnswerMode,
+    selectedModelId,
+    stateReady,
+    themeMode,
+  ]);
 
   const activeConvo = conversations.find((c) => c.id === activeId) || null;
   const activeFiles = activeId ? conversationFiles[activeId] || [] : [];

@@ -17,7 +17,11 @@ import {
   cancelFileProcessing,
   enqueueFileProcessingJobs,
 } from "@/lib/server/processing-queue";
-import { appSessionErrorResponse, assertAppSession } from "@/lib/server/app-session";
+import {
+  appSessionErrorResponse,
+  assertAppUserSession,
+} from "@/lib/server/app-session";
+import { ensureConversationRecord } from "@/lib/server/chat-state-store";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -53,8 +57,9 @@ function normalizeMimeType(file: File): string {
 }
 
 export async function GET(req: NextRequest) {
+  let userId = "";
   try {
-    await assertAppSession(req);
+    ({ userId } = await assertAppUserSession(req));
   } catch (error) {
     return appSessionErrorResponse(error, req);
   }
@@ -64,13 +69,15 @@ export async function GET(req: NextRequest) {
     return json({ error: "Missing conversationId" }, 400);
   }
 
-  const files = await listConversationFiles(conversationId);
+  await ensureConversationRecord(userId, conversationId);
+  const files = await listConversationFiles(userId, conversationId);
   return json({ files: files.map(toClientConversationFile) });
 }
 
 export async function POST(req: NextRequest) {
+  let userId = "";
   try {
-    await assertAppSession(req);
+    ({ userId } = await assertAppUserSession(req));
   } catch (error) {
     return appSessionErrorResponse(error, req);
   }
@@ -81,6 +88,8 @@ export async function POST(req: NextRequest) {
   if (!conversationId) {
     return json({ error: "Missing conversationId" }, 400);
   }
+
+  await ensureConversationRecord(userId, conversationId);
 
   const files = formData.getAll("files").filter((value): value is File => value instanceof File);
   if (files.length === 0) {
@@ -113,6 +122,7 @@ export async function POST(req: NextRequest) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const pendingRecord = await createPendingFileRecord({
+      userId,
       conversationId,
       fileName: file.name,
       mimeType,
@@ -123,18 +133,19 @@ export async function POST(req: NextRequest) {
     pendingFileIds.push(pendingRecord.id);
   }
 
-  const pendingFiles = await listConversationFiles(conversationId);
+  const pendingFiles = await listConversationFiles(userId, conversationId);
 
   after(async () => {
-    await enqueueFileProcessingJobs(conversationId, pendingFileIds);
+    await enqueueFileProcessingJobs(userId, conversationId, pendingFileIds);
   });
 
   return json({ files: pendingFiles.map(toClientConversationFile) });
 }
 
 export async function PATCH(req: NextRequest) {
+  let userId = "";
   try {
-    await assertAppSession(req);
+    ({ userId } = await assertAppUserSession(req));
   } catch (error) {
     return appSessionErrorResponse(error, req);
   }
@@ -145,13 +156,15 @@ export async function PATCH(req: NextRequest) {
     return json({ error: "Missing conversationId, fileId, or active" }, 400);
   }
 
-  const files = await setConversationFileActive(conversationId, fileId, active);
+  await ensureConversationRecord(userId, conversationId);
+  const files = await setConversationFileActive(userId, conversationId, fileId, active);
   return json({ files: files.map(toClientConversationFile) });
 }
 
 export async function DELETE(req: NextRequest) {
+  let userId = "";
   try {
-    await assertAppSession(req);
+    ({ userId } = await assertAppUserSession(req));
   } catch (error) {
     return appSessionErrorResponse(error, req);
   }
@@ -164,12 +177,12 @@ export async function DELETE(req: NextRequest) {
   const fileId = getFileId(req);
   if (fileId) {
     cancelFileProcessing(fileId);
-    await deleteConversationFile(conversationId, fileId);
-    const files = await listConversationFiles(conversationId);
+    await deleteConversationFile(userId, conversationId, fileId);
+    const files = await listConversationFiles(userId, conversationId);
     return json({ files: files.map(toClientConversationFile) });
   }
 
-  cancelConversationProcessing(conversationId);
-  await deleteConversationFiles(conversationId);
+  cancelConversationProcessing(userId, conversationId);
+  await deleteConversationFiles(userId, conversationId);
   return json({ ok: true });
 }

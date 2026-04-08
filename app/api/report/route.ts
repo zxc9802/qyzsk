@@ -1,6 +1,10 @@
 import { NextRequest } from "next/server";
 import type { ReportGenerationRequest } from "@/lib/report";
-import { appSessionErrorResponse, assertAppSession } from "@/lib/server/app-session";
+import {
+  appSessionErrorResponse,
+  assertAppUserSession,
+} from "@/lib/server/app-session";
+import { ensureConversationRecord } from "@/lib/server/chat-state-store";
 import { buildConversationReport } from "@/lib/server/report-builder";
 
 export const runtime = "nodejs";
@@ -35,8 +39,9 @@ function isValidReportRequest(body: unknown): body is ReportGenerationRequest {
 
 export async function POST(req: NextRequest) {
   try {
+    let userId = "";
     try {
-      await assertAppSession(req);
+      ({ userId } = await assertAppUserSession(req));
     } catch (error) {
       return appSessionErrorResponse(error, req);
     }
@@ -47,7 +52,8 @@ export async function POST(req: NextRequest) {
       return createJsonResponse({ error: "报告生成请求缺少必要字段。" }, 400);
     }
 
-    const report = await buildConversationReport(body);
+    await ensureConversationRecord(userId, body.conversationId, body.conversationTitle);
+    const report = await buildConversationReport(body, userId);
     return createJsonResponse({ report }, 200);
   } catch (error) {
     console.error("Report API error:", error);

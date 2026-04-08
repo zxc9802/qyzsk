@@ -83,12 +83,13 @@ type ResolvedReportDraft = {
 };
 
 export async function buildConversationReport(
-  input: ReportGenerationRequest
+  input: ReportGenerationRequest,
+  userId: string
 ): Promise<ConversationReport> {
   const messages = normalizeMessages(input.messages);
   const knowledgeHits = collectKnowledgeHits(messages);
   const diagnoses = collectDiagnoses(messages);
-  const files = input.conversationId ? await listConversationFiles(input.conversationId) : [];
+  const files = input.conversationId ? await listConversationFiles(userId, input.conversationId) : [];
   const fileItems = files
     .filter((file) => file.status === "ready")
     .map<ReportFileSummaryItem>((file) => ({
