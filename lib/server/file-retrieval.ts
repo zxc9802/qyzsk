@@ -1,3 +1,4 @@
+import type { RetrievalSourceHit } from "@/lib/types";
 import { getFileSegments, listConversationFiles } from "@/lib/server/file-store";
 
 const MAX_FILES_IN_CONTEXT = 3;
@@ -11,14 +12,30 @@ export async function buildConversationFileContext(
   conversationId: string,
   query: string
 ): Promise<string> {
+  return (await buildConversationFileRetrieval(conversationId, query)).context;
+}
+
+export async function buildConversationFileRetrieval(
+  conversationId: string,
+  query: string
+): Promise<{
+  context: string;
+  hits: RetrievalSourceHit[];
+}> {
   const activeFiles = (await listConversationFiles(conversationId))
     .filter((file) => file.active && file.status === "ready")
     .slice(0, MAX_FILES_IN_CONTEXT);
 
-  if (activeFiles.length === 0) return "";
+  if (activeFiles.length === 0) {
+    return {
+      context: "",
+      hits: [],
+    };
+  }
 
   const terms = buildSearchTerms(query);
   const blocks: string[] = [];
+  const hits: RetrievalSourceHit[] = [];
   let budget = MAX_CONTEXT_CHARS;
 
   for (const file of activeFiles) {
@@ -41,12 +58,31 @@ export async function buildConversationFileContext(
     const block = lines.join("\n");
     if (block.length > budget) break;
     blocks.push(block);
+    hits.push({
+      id: file.id,
+      type: "file",
+      title: file.name,
+      category: file.kind,
+      detail:
+        selectedSegments.length > 0
+          ? selectedSegments.map((segment) => segment.label).join("、")
+          : "摘要命中",
+      excerpt: trimTo(file.summary || file.excerpt || "暂无摘要。", 120),
+    });
     budget -= block.length;
   }
 
-  if (blocks.length === 0) return "";
+  if (blocks.length === 0) {
+    return {
+      context: "",
+      hits: [],
+    };
+  }
 
-  return `以下是当前会话里用户上传并保持激活的资料摘要。它们只是后台参考资料，不要把内部片段标签原样展示给用户。只有当这些资料和问题有关时再使用。\n\n${blocks.join("\n\n---\n\n")}`;
+  return {
+    context: `以下是当前会话里用户上传并保持激活的资料摘要。它们只是后台参考资料，不要把内部片段标签原样展示给用户。只有当这些资料和问题有关时再使用。\n\n${blocks.join("\n\n---\n\n")}`,
+    hits,
+  };
 }
 
 export async function buildConversationFileDiagnosisContext(

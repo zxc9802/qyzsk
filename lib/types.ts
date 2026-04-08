@@ -1,10 +1,24 @@
 import { ChatModelId } from "./chat-models";
 import { AnswerMode } from "./answer-modes";
+import { KnowledgeMode } from "./knowledge-mode";
+import { ThemeMode } from "./theme";
 
 export interface KnowledgeBaseHit {
   id: string;
   title: string;
   category: string;
+}
+
+export type RetrievalSourceType = "wiki" | "knowledge_base" | "file";
+
+export interface RetrievalSourceHit {
+  id: string;
+  type: RetrievalSourceType;
+  title: string;
+  category: string;
+  detail?: string;
+  excerpt?: string;
+  score?: number;
 }
 
 export interface QuestionDiagnosis {
@@ -29,6 +43,7 @@ export interface Message {
   timestamp: number;
   modelId?: ChatModelId | string;
   kbHits?: KnowledgeBaseHit[];
+  sourceHits?: RetrievalSourceHit[];
   questionDiagnosis?: QuestionDiagnosis;
 }
 
@@ -69,6 +84,8 @@ export interface UserSettings {
   roleName: string;
   chatModelId?: ChatModelId;
   answerMode?: AnswerMode;
+  knowledgeMode?: KnowledgeMode;
+  themeMode?: ThemeMode;
 }
 
 export const ROLES = [

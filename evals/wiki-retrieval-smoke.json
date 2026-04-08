@@ -1,0 +1,22 @@
+[
+  {
+    "id": "wiki-001",
+    "query": "判断一个产品值不值得做，应该看哪些维度？",
+    "expectedWikiIds": ["concepts/超级产品方法论"]
+  },
+  {
+    "id": "wiki-002",
+    "query": "短视频脚本应该先看人群还是卖点？",
+    "expectedWikiIds": ["concepts/内容电商方法论"]
+  },
+  {
+    "id": "wiki-003",
+    "query": "店铺最近不出单了，应该怎么排查？",
+    "expectedWikiIds": ["concepts/运营漏斗诊断"]
+  },
+  {
+    "id": "wiki-004",
+    "query": "我刚入职，问 AI 之前应该先准备什么信息？",
+    "expectedWikiIds": ["roles/新员工提问原则"]
+  }
+]

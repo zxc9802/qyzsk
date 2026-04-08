@@ -16,7 +16,32 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Wiki Admin
+
+The app now supports a `Wiki 优先 / 仅 KB` knowledge mode toggle in chat and a dedicated admin review console at `/admin`.
+
+To enable the admin APIs, add a `WIKI_ADMIN_TOKEN` value to your local `.env`:
+
+```bash
+WIKI_ADMIN_TOKEN=change-me
+```
+
+Then open `/admin`, paste the same token into the page, and you can:
+
+- ingest candidate knowledge into draft
+- edit / approve / reject wiki drafts
+- run wiki lint checks for broken links, isolated pages, and stale pages
+
+Published wiki pages are stored under `wiki/`. Drafts, raw sources, and index cache are stored under `.kb-chat-data/wiki/`.
+
+### Knowledge Retrieval
+
+The chat route now supports two knowledge strategies:
+
+- `Wiki 优先`: prefer published wiki pages and backfill with KB entries
+- `仅 KB`: skip wiki and use the existing KB retrieval path
+
+The assistant UI also shows which `Wiki / KB / 资料` sources were used for each answer.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 

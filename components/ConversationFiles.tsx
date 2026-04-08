@@ -14,6 +14,14 @@ function statusLabel(file: ConversationFile): string {
   return file.active ? "参考中" : "未参考";
 }
 
+function fileBadge(file: ConversationFile): string {
+  const extension = file.metadata.extension?.replace(/^\./, "").toUpperCase();
+  if (extension) return extension;
+  if (file.kind === "document") return "DOC";
+  if (file.kind === "image") return "IMG";
+  return "VID";
+}
+
 export default function ConversationFiles({
   files,
   onToggle,
@@ -36,84 +44,113 @@ export default function ConversationFiles({
   });
 
   return (
-    <div className="space-y-1.5 max-h-[112px] overflow-y-auto pr-1">
-      {orderedFiles.map((file) => (
-        <div
-          key={file.id}
-          className="w-full flex items-center gap-2 rounded-xl px-2 py-1.5 text-xs transition-all duration-150"
-          style={{
-            background: file.active ? "var(--color-amber-glow)" : "rgba(255,255,255,0.72)",
-            border: file.active
-              ? "1px solid rgba(212, 148, 76, 0.24)"
-              : "1px solid var(--color-border-light)",
-            opacity: file.status === "ready" ? 1 : 0.8,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => onToggle(file.id, !file.active)}
-            disabled={file.status !== "ready"}
-            className="min-w-0 flex-1 flex items-center gap-3 px-1 py-1 cursor-pointer disabled:cursor-default"
-            title={file.status === "ready"
-              ? `${file.active ? "点按移出当前参考" : "点按加入当前参考"}`
-              : statusLabel(file)}
+    <div className="space-y-2 max-h-[136px] overflow-y-auto pr-1">
+      {orderedFiles.map((file) => {
+        const isReady = file.status === "ready";
+        return (
+          <div
+            key={file.id}
+            className="flex items-center gap-3 rounded-[20px] border px-3 py-2.5 transition-all duration-150"
+            style={{
+              background: file.active
+                ? "var(--file-row-active)"
+                : "var(--file-row-surface)",
+              borderColor: file.active ? "var(--surface-outline-accent-strong)" : "var(--surface-outline)",
+              opacity: file.status === "ready" ? 1 : 0.82,
+            }}
           >
-            <span
-              className="shrink-0 w-1.5 h-1.5 rounded-full"
-              style={{
-                background: file.status === "failed"
-                  ? "#dc2626"
-                  : file.status === "processing"
-                    ? "var(--color-amber)"
+            <button
+              type="button"
+              onClick={() => onToggle(file.id, !file.active)}
+              disabled={!isReady}
+              className="min-w-0 flex flex-1 items-center gap-3 text-left cursor-pointer disabled:cursor-default"
+              title={isReady ? (file.active ? "点按移出当前参考" : "点按加入当前参考") : statusLabel(file)}
+            >
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                <span
+                  className="absolute inline-flex h-full w-full rounded-full"
+                  style={{
+                    background: file.status === "processing"
+                      ? "rgba(214, 161, 99, 0.28)"
+                      : file.status === "failed"
+                        ? "rgba(248, 113, 113, 0.22)"
+                        : file.active
+                          ? "rgba(214, 161, 99, 0.22)"
+                          : "rgba(141, 164, 201, 0.18)",
+                  }}
+                />
+                <span
+                  className="relative inline-flex h-2.5 w-2.5 rounded-full"
+                  style={{
+                    background: file.status === "failed"
+                      ? "#f87171"
+                      : file.status === "processing"
+                        ? "var(--color-amber)"
+                        : file.active
+                          ? "var(--color-amber-deep)"
+                          : "var(--color-ink-muted)",
+                  }}
+                />
+              </span>
+
+              <span
+                className="inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.2em]"
+                style={{
+                  borderColor: "var(--surface-outline-accent)",
+                  color: "var(--color-amber-soft)",
+                  background: "var(--chip-soft)",
+                }}
+              >
+                {fileBadge(file)}
+              </span>
+
+              <span className="min-w-0 flex-1 overflow-hidden">
+                <span
+                  className="block whitespace-nowrap overflow-x-auto text-sm leading-6"
+                  style={{ color: "var(--color-sidebar-text-bright)" }}
+                >
+                  {file.name}
+                </span>
+              </span>
+
+              <span
+                className="shrink-0 rounded-full px-2.5 py-1 text-[10px]"
+                style={{
+                  color: file.status === "failed"
+                    ? "#fecaca"
                     : file.active
                       ? "var(--color-amber-deep)"
                       : "var(--color-ink-muted)",
-              }}
-            />
-            <span
-              className="min-w-0 flex-1 text-left whitespace-nowrap overflow-x-auto"
-              style={{ color: "var(--color-ink)" }}
-            >
-              {file.name}
-            </span>
-            <span
-              className="shrink-0 text-[11px]"
+                  background: file.status === "failed"
+                    ? "rgba(127, 29, 29, 0.24)"
+                    : file.active
+                      ? "var(--chip-soft)"
+                      : "var(--subtle-surface)",
+                }}
+              >
+                {statusLabel(file)}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onDelete(file.id)}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-all duration-150 cursor-pointer"
               style={{
-                color: file.status === "failed"
-                  ? "#b91c1c"
-                  : file.active
-                    ? "var(--color-amber-deep)"
-                    : "var(--color-ink-muted)",
+                borderColor: "var(--surface-outline)",
+                color: "var(--color-ink-muted)",
+                background: "var(--subtle-surface)",
               }}
+              title="删除文件"
             >
-              {statusLabel(file)}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onDelete(file.id)}
-            className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center cursor-pointer transition-all duration-150"
-            style={{
-              color: "var(--color-ink-muted)",
-              background: "transparent",
-            }}
-            title="删除文件"
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(220, 38, 38, 0.08)";
-              e.currentTarget.style.color = "#b91c1c";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-              e.currentTarget.style.color = "var(--color-ink-muted)";
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M2.5 2.5L9.5 9.5" />
-              <path d="M9.5 2.5L2.5 9.5" />
-            </svg>
-          </button>
-        </div>
-      ))}
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M2.5 2.5L9.5 9.5" />
+                <path d="M9.5 2.5L2.5 9.5" />
+              </svg>
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

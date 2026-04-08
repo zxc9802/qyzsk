@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ANSWER_MODES, AnswerMode, getAnswerModeOption } from "@/lib/answer-modes";
-import { CHAT_MODELS, ChatModelId, getChatModelOption } from "@/lib/chat-models";
+import { AnswerMode } from "@/lib/answer-modes";
+import { CHAT_MODELS, ChatModelId } from "@/lib/chat-models";
+import { KNOWLEDGE_MODES, KnowledgeMode } from "@/lib/knowledge-mode";
 import { ConversationFile } from "@/lib/types";
 import ConversationFiles from "./ConversationFiles";
 
@@ -16,6 +17,8 @@ interface InputBarProps {
   onModelChange: (modelId: ChatModelId) => void;
   selectedAnswerMode: AnswerMode;
   onAnswerModeChange: (mode: AnswerMode) => void;
+  selectedKnowledgeMode: KnowledgeMode;
+  onKnowledgeModeChange: (mode: KnowledgeMode) => void;
   disabled?: boolean;
   isUploading?: boolean;
   uploadStatus?: string | null;
@@ -29,8 +32,8 @@ export default function InputBar({
   onDeleteFile,
   selectedModelId,
   onModelChange,
-  selectedAnswerMode,
-  onAnswerModeChange,
+  selectedKnowledgeMode,
+  onKnowledgeModeChange,
   disabled = false,
   isUploading = false,
   uploadStatus,
@@ -38,13 +41,11 @@ export default function InputBar({
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const currentModel = getChatModelOption(selectedModelId);
-  const currentAnswerMode = getAnswerModeOption(selectedAnswerMode);
 
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 160) + "px";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
     }
   }, [text]);
 
@@ -78,106 +79,74 @@ export default function InputBar({
     e.target.value = "";
   };
 
-  return (
-    <div className="shrink-0 px-6 pb-5 pt-3"
-      style={{ background: "linear-gradient(to top, var(--color-surface) 80%, transparent)" }}>
-      <div className="max-w-5xl mx-auto">
-        <ConversationFiles files={files} onToggle={onToggleFile} onDelete={onDeleteFile} />
-        <div className="mt-2 mb-2 flex items-center justify-between gap-3 px-1">
-          <div className="flex items-center gap-4 min-w-0 flex-wrap">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-[11px] shrink-0" style={{ color: "var(--color-ink-muted)" }}>
-                回答模式
-              </span>
-              <div className="relative min-w-0">
-                <select
-                  value={selectedAnswerMode}
-                  onChange={(e) => onAnswerModeChange(e.target.value as AnswerMode)}
-                  disabled={disabled}
-                  className="appearance-none rounded-lg pl-3 pr-7 py-1.5 text-xs outline-none cursor-pointer disabled:cursor-default"
-                  style={{
-                    background: "var(--color-surface-raised)",
-                    color: "var(--color-ink)",
-                    border: "1px solid var(--color-border-light)",
-                  }}
-                >
-                  {ANSWER_MODES.map((mode) => (
-                    <option key={mode.id} value={mode.id}>
-                      {mode.label}
-                    </option>
-                  ))}
-                </select>
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 10 10"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2"
-                  style={{ color: "var(--color-ink-muted)" }}
-                >
-                  <path d="M2.5 3.5L5 6.5L7.5 3.5" />
-                </svg>
-              </div>
-            </div>
+  const footerText = uploadStatus || null;
 
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-[11px] shrink-0" style={{ color: "var(--color-ink-muted)" }}>
-                回答模型
-              </span>
-              <div className="relative min-w-0">
-                <select
-                  value={selectedModelId}
-                  onChange={(e) => onModelChange(e.target.value as ChatModelId)}
-                  disabled={disabled}
-                  className="appearance-none rounded-lg pl-3 pr-7 py-1.5 text-xs outline-none cursor-pointer disabled:cursor-default"
-                  style={{
-                    background: "var(--color-surface-raised)",
-                    color: "var(--color-ink)",
-                    border: "1px solid var(--color-border-light)",
-                  }}
-                >
-                  {CHAT_MODELS.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                    </option>
-                  ))}
-                </select>
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 10 10"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2"
-                  style={{ color: "var(--color-ink-muted)" }}
-                >
-                  <path d="M2.5 3.5L5 6.5L7.5 3.5" />
-                </svg>
-              </div>
-            </div>
+  return (
+    <div className="shrink-0 px-4 pb-2 pt-0 md:px-6 md:pb-3">
+      <div className="mx-auto max-w-6xl">
+        <ConversationFiles files={files} onToggle={onToggleFile} onDelete={onDeleteFile} />
+
+        <div className="mt-2 flex items-center justify-start gap-3">
+          <div className="relative">
+            <select
+              value={selectedModelId}
+              onChange={(e) => onModelChange(e.target.value as ChatModelId)}
+              className="command-select pr-9 text-[13px] cursor-pointer"
+              title="选择回答模型"
+            >
+              {CHAT_MODELS.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                </option>
+              ))}
+            </select>
+            <svg
+              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2"
+              width="10"
+              height="10"
+              viewBox="0 0 10 10"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              style={{ color: "var(--color-ink-muted)" }}
+            >
+              <path d="M2.5 3.5L5 6.5L7.5 3.5" />
+            </svg>
           </div>
-          <span className="text-[11px] truncate" style={{ color: "var(--color-ink-muted)" }}>
-            {currentAnswerMode.description} · {currentModel.description}
-          </span>
+          <div className="relative">
+            <select
+              value={selectedKnowledgeMode}
+              onChange={(e) => onKnowledgeModeChange(e.target.value as KnowledgeMode)}
+              className="command-select pr-9 text-[13px] cursor-pointer"
+              title="选择知识检索策略"
+            >
+              {KNOWLEDGE_MODES.map((mode) => (
+                <option key={mode.id} value={mode.id}>
+                  {mode.label}
+                </option>
+              ))}
+            </select>
+            <svg
+              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2"
+              width="10"
+              height="10"
+              viewBox="0 0 10 10"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              style={{ color: "var(--color-ink-muted)" }}
+            >
+              <path d="M2.5 3.5L5 6.5L7.5 3.5" />
+            </svg>
+          </div>
         </div>
 
-        <div className="flex items-end gap-3 p-3 rounded-2xl transition-all duration-200"
+        <div
+          className="mt-1 flex items-end gap-3 rounded-[30px] border px-4 py-4 transition-all duration-200 md:px-5"
           style={{
-            background: "var(--color-surface-raised)",
-            border: "1px solid var(--color-border)",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
-            marginTop: files.length > 0 ? "8px" : "0",
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = "var(--color-amber-soft)";
-            e.currentTarget.style.boxShadow = "0 2px 12px rgba(212, 148, 76, 0.1)";
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = "var(--color-border)";
-            e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)";
+            background: "var(--surface-command)",
+            borderColor: "var(--surface-outline-strong)",
+            boxShadow: "var(--card-shadow)",
           }}
         >
           <input
@@ -192,10 +161,13 @@ export default function InputBar({
             type="button"
             onClick={handlePickFiles}
             disabled={disabled || isUploading}
-            className="shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] border transition-all duration-200 cursor-pointer disabled:cursor-default"
             style={{
-              background: "var(--color-surface-sunken)",
-              color: isUploading ? "var(--color-amber-deep)" : "var(--color-ink-soft)",
+              background: isUploading
+                ? "rgba(214, 161, 99, 0.14)"
+                : "var(--subtle-surface)",
+              borderColor: "var(--surface-outline-strong)",
+              color: isUploading ? "var(--color-amber-deep)" : "var(--color-sidebar-text-bright)",
               opacity: disabled ? 0.6 : 1,
             }}
             title="上传 PDF、Word、MP4、PNG、JPG"
@@ -210,27 +182,34 @@ export default function InputBar({
               </svg>
             )}
           </button>
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="输入你的问题，直接问就好..."
-            disabled={disabled}
-            rows={1}
-            className="flex-1 bg-transparent border-none outline-none resize-none text-sm leading-relaxed px-2 py-1.5"
-            style={{
-              color: "var(--color-ink)",
-              maxHeight: "160px",
-            }}
-          />
+
+          <div className="min-w-0 flex-1">
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="把你的问题、目标或资料分析任务写在这里。"
+              disabled={disabled}
+              rows={1}
+              className="w-full resize-none border-none bg-transparent px-2 py-2 text-[15px] leading-8 outline-none"
+              style={{
+                color: "var(--color-sidebar-text-bright)",
+                maxHeight: "180px",
+              }}
+            />
+          </div>
+
           <button
             onClick={handleSubmit}
             disabled={disabled || !text.trim()}
-            className="shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] transition-all duration-200 cursor-pointer disabled:cursor-default"
             style={{
-              background: text.trim() && !disabled ? "var(--color-amber)" : "var(--color-border-light)",
-              color: text.trim() && !disabled ? "#fff" : "var(--color-ink-muted)",
+              background: text.trim() && !disabled
+                ? "var(--brand-badge)"
+                : "var(--subtle-surface)",
+              color: text.trim() && !disabled ? "var(--brand-badge-text)" : "var(--color-ink-muted)",
+              boxShadow: text.trim() && !disabled ? "var(--button-accent-shadow)" : "none",
             }}
           >
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
@@ -238,9 +217,12 @@ export default function InputBar({
             </svg>
           </button>
         </div>
-        <p className="text-center mt-2 text-xs" style={{ color: "var(--color-ink-muted)" }}>
-          {uploadStatus || "支持 PDF / Word / MP4 / PNG / JPG。按 Enter 发送，Shift+Enter 换行。"}
-        </p>
+
+        {footerText ? (
+          <p className="mt-2 text-center text-[11px] leading-5" style={{ color: "var(--color-ink-muted)" }}>
+            {footerText}
+          </p>
+        ) : null}
       </div>
     </div>
   );

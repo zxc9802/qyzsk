@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server";
 import { DEFAULT_ANSWER_MODE, isAnswerMode } from "@/lib/answer-modes";
 import { DEFAULT_CHAT_MODEL_ID, getChatModelOption, isChatModelId } from "@/lib/chat-models";
+import { DEFAULT_KNOWLEDGE_MODE, isKnowledgeMode } from "@/lib/knowledge-mode";
 import { buildSimpleAnswerPrompt, buildSystemPrompt } from "@/lib/system-prompt";
-import { buildConversationFileContext, buildConversationFileDiagnosisContext } from "@/lib/server/file-retrieval";
+import { buildConversationFileDiagnosisContext } from "@/lib/server/file-retrieval";
 import { generateGeminiTextWithClient, type GeminiNativeClientConfig } from "@/lib/server/gemini-native";
-import { buildKnowledgeBaseRetrieval } from "@/lib/server/kb-retrieval";
 import { buildConversationMediaContext, type OpenAIContentPart } from "@/lib/server/media-parts";
+import { buildRetrievalOrchestratorResult } from "@/lib/server/retrieval-orchestrator";
 import {
   buildModelDiagnosisPrompt,
   diagnoseQuestion,
@@ -205,7 +206,7 @@ function buildOpenAITextPart(text: string): OpenAIContentPart {
 
 function buildGeminiAnswerContext(options: {
   selectedScopeContext: string;
-  kbContext: string;
+  knowledgeContext: string;
   fileContext: string;
   recentHistory: HistoryMessage[];
   message: string;
@@ -218,7 +219,7 @@ function buildGeminiAnswerContext(options: {
 
   return [
     options.selectedScopeContext,
-    options.kbContext,
+    options.knowledgeContext,
     options.fileContext,
     historyText,
     `当前用户问题：${options.message}`,
@@ -252,7 +253,7 @@ function readUpstreamError(text: string): UpstreamErrorDetails {
 
 export async function POST(req: NextRequest) {
   try {
-    const { message, role, history, conversationId, modelId, answerMode } = await req.json();
+    const { message, role, history, conversationId, modelId, answerMode, knowledgeMode } = await req.json();
 
     if (!message || typeof message !== "string") {
       return createJsonResponse({ error: "Missing message" }, 400);
@@ -266,6 +267,10 @@ export async function POST(req: NextRequest) {
       typeof answerMode === "string" && isAnswerMode(answerMode)
         ? answerMode
         : DEFAULT_ANSWER_MODE;
+    const resolvedKnowledgeMode =
+      typeof knowledgeMode === "string" && isKnowledgeMode(knowledgeMode)
+        ? knowledgeMode
+        : DEFAULT_KNOWLEDGE_MODE;
     const modelOption = getChatModelOption(resolvedModelId);
     const provider = resolveProviderConfig(modelOption);
     const recentHistory = normalizeHistory(history);
@@ -339,16 +344,21 @@ export async function POST(req: NextRequest) {
       resolvedAnswerMode === "deep"
         ? buildSystemPrompt(role || "new")
         : buildSimpleAnswerPrompt();
-    const kbRetrieval = buildKnowledgeBaseRetrieval(message, role || "new");
-    const kbContext = kbRetrieval.context;
-    const kbHits = kbRetrieval.hits;
     const selectedScopeContext = diagnosis?.selectedScope
       ? `当前用户已经明确选择的细分场景：${diagnosis.selectedScope}。请按这个场景回答。`
       : "";
-    const fileContext =
-      typeof conversationId === "string" && conversationId
-        ? await buildConversationFileContext(conversationId, message)
-        : "";
+    const retrieval = await buildRetrievalOrchestratorResult({
+      query: message,
+      role: role || "new",
+      conversationId: typeof conversationId === "string" ? conversationId : undefined,
+      history: recentHistory,
+      diagnosis,
+      knowledgeMode: resolvedKnowledgeMode,
+    });
+    const knowledgeContext = retrieval.knowledgeContext;
+    const fileContext = retrieval.fileContext;
+    const kbHits = retrieval.kbHits;
+    const sourceHits = retrieval.sourceHits;
     const geminiClient = buildGeminiClient(modelOption, provider);
 
     if (geminiClient && mediaContext.hasMedia) {
@@ -361,7 +371,7 @@ export async function POST(req: NextRequest) {
             {
               text: buildGeminiAnswerContext({
                 selectedScopeContext,
-                kbContext,
+                knowledgeContext,
                 fileContext,
                 recentHistory,
                 message,
@@ -376,6 +386,7 @@ export async function POST(req: NextRequest) {
           [
             ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
             ...(kbHits.length > 0 ? [{ kbHits }] : []),
+            ...(sourceHits.length > 0 ? [{ sourceHits }] : []),
             { content: answerText },
           ]
         );
@@ -387,7 +398,7 @@ export async function POST(req: NextRequest) {
     const messages = [
       { role: "system", content: systemPrompt },
       ...(selectedScopeContext ? [{ role: "system", content: selectedScopeContext }] : []),
-      ...(kbContext ? [{ role: "system", content: kbContext }] : []),
+      ...(knowledgeContext ? [{ role: "system", content: knowledgeContext }] : []),
       ...(fileContext ? [{ role: "system", content: fileContext }] : []),
       ...recentHistory.map((item) => ({
         role: item.role,
@@ -483,6 +494,10 @@ export async function POST(req: NextRequest) {
 
           if (kbHits.length > 0) {
             safeEnqueue(`data: ${JSON.stringify({ kbHits })}\n\n`);
+          }
+
+          if (sourceHits.length > 0) {
+            safeEnqueue(`data: ${JSON.stringify({ sourceHits })}\n\n`);
           }
 
           while (true) {

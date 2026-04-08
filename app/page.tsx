@@ -2,8 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { DEFAULT_ANSWER_MODE, isAnswerMode, type AnswerMode } from "@/lib/answer-modes";
-import { DEFAULT_CHAT_MODEL_ID, getChatModelOption, isChatModelId, type ChatModelId } from "@/lib/chat-models";
+import { DEFAULT_CHAT_MODEL_ID, isChatModelId, type ChatModelId } from "@/lib/chat-models";
+import { DEFAULT_KNOWLEDGE_MODE, isKnowledgeMode, type KnowledgeMode } from "@/lib/knowledge-mode";
+import { DEFAULT_THEME_MODE, isThemeMode, type ThemeMode } from "@/lib/theme";
 import { Conversation, ConversationFile, Message } from "@/lib/types";
+import { ConversationReport } from "@/lib/report";
 import { sanitizeAssistantOutput } from "@/lib/sanitize-assistant-output";
 import {
   getSettings, saveSettings,
@@ -15,6 +18,7 @@ import {
 import Sidebar from "@/components/Sidebar";
 import ChatArea from "@/components/ChatArea";
 import RoleSelector from "@/components/RoleSelector";
+import ReportPreviewModal from "@/components/ReportPreviewModal";
 
 type FileMap = Record<string, ConversationFile[]>;
 type UploadFlagMap = Record<string, boolean>;
@@ -51,12 +55,18 @@ export default function Home() {
   const [roleName, setRoleName] = useState<string>("选择岗位");
   const [selectedModelId, setSelectedModelId] = useState<ChatModelId>(DEFAULT_CHAT_MODEL_ID);
   const [selectedAnswerMode, setSelectedAnswerMode] = useState<AnswerMode>(DEFAULT_ANSWER_MODE);
+  const [selectedKnowledgeMode, setSelectedKnowledgeMode] = useState<KnowledgeMode>(DEFAULT_KNOWLEDGE_MODE);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(DEFAULT_THEME_MODE);
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [conversationFiles, setConversationFiles] = useState<FileMap>({});
   const [uploadingByConversation, setUploadingByConversation] = useState<UploadFlagMap>({});
   const [uploadStatusByConversation, setUploadStatusByConversation] = useState<UploadStatusMap>({});
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [activeReport, setActiveReport] = useState<ConversationReport | null>(null);
 
   useEffect(() => {
     const settings = getSettings();
@@ -71,6 +81,12 @@ export default function Home() {
       }
       if (settings.answerMode && isAnswerMode(settings.answerMode)) {
         setSelectedAnswerMode(settings.answerMode);
+      }
+      if (settings.knowledgeMode && isKnowledgeMode(settings.knowledgeMode)) {
+        setSelectedKnowledgeMode(settings.knowledgeMode);
+      }
+      if (settings.themeMode && isThemeMode(settings.themeMode)) {
+        setThemeMode(settings.themeMode);
       }
     } else {
       setShowRoleModal(true);
@@ -92,9 +108,16 @@ export default function Home() {
         roleName,
         chatModelId: selectedModelId,
         answerMode: selectedAnswerMode,
+        knowledgeMode: selectedKnowledgeMode,
+        themeMode,
       });
     }
-  }, [mounted, role, roleName, selectedModelId, selectedAnswerMode]);
+  }, [mounted, role, roleName, selectedModelId, selectedAnswerMode, selectedKnowledgeMode, themeMode]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    document.documentElement.dataset.theme = themeMode;
+  }, [mounted, themeMode]);
 
   useEffect(() => {
     if (mounted) saveConversations(conversations);
@@ -108,6 +131,12 @@ export default function Home() {
   const activeFiles = activeId ? conversationFiles[activeId] || [] : [];
   const isUploading = activeId ? Boolean(uploadingByConversation[activeId]) : false;
   const uploadStatus = activeId ? uploadStatusByConversation[activeId] || null : null;
+
+  useEffect(() => {
+    setActiveReport(null);
+    setReportError(null);
+    setIsReportModalOpen(false);
+  }, [activeId]);
 
   const fetchConversationFiles = useCallback(async (conversationId: string) => {
     try {
@@ -357,6 +386,7 @@ export default function Home() {
           history,
           modelId: selectedModelId,
           answerMode: selectedAnswerMode,
+          knowledgeMode: selectedKnowledgeMode,
         }),
       });
 
@@ -395,6 +425,13 @@ export default function Home() {
                     })
                   );
                 }
+                if (Array.isArray(parsed.sourceHits)) {
+                  setConversations((prev) =>
+                    updateLastAssistantMessage(prev, conversationId, {
+                      sourceHits: parsed.sourceHits,
+                    })
+                  );
+                }
                 if (parsed.content) {
                   accumulated += parsed.content;
                   const sanitized = sanitizeAssistantOutput(accumulated);
@@ -423,50 +460,137 @@ export default function Home() {
     } finally {
       setIsStreaming(false);
     }
-  }, [ensureConversationContext, isStreaming, role, selectedModelId, selectedAnswerMode]);
+  }, [ensureConversationContext, isStreaming, role, selectedModelId, selectedAnswerMode, selectedKnowledgeMode]);
+
+  const handleGenerateReport = useCallback(async () => {
+    if (!activeConvo || isGeneratingReport || isStreaming) return;
+
+    setIsReportModalOpen(true);
+    setIsGeneratingReport(true);
+    setReportError(null);
+
+    try {
+      const response = await fetch("/api/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: activeConvo.id,
+          conversationTitle: activeConvo.title,
+          messages: activeConvo.messages,
+          roleId: role || "new",
+          roleName,
+          modelId: selectedModelId,
+          answerMode: selectedAnswerMode,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "生成报告失败");
+      }
+
+      setActiveReport(data.report as ConversationReport);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "生成报告失败，请稍后再试。";
+      setReportError(message);
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  }, [activeConvo, isGeneratingReport, isStreaming, role, roleName, selectedModelId, selectedAnswerMode]);
 
   if (!mounted) {
     return (
-      <div className="h-full flex items-center justify-center" style={{ background: "var(--color-surface)" }}>
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold"
-            style={{ background: "var(--color-amber)", color: "#fff" }}>K</div>
-          <span className="text-sm" style={{ color: "var(--color-ink-muted)" }}>加载中...</span>
+      <div className="relative h-full overflow-hidden">
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(circle at top left, rgba(214,161,99,0.16), transparent 28%), radial-gradient(circle at bottom right, rgba(59,94,142,0.24), transparent 34%)",
+          }}
+        />
+        <div className="relative flex h-full items-center justify-center px-4">
+          <div className="panel-surface flex items-center gap-4 rounded-[26px] px-6 py-5">
+            <div
+              className="flex h-11 w-11 items-center justify-center rounded-[16px] text-base font-semibold"
+              style={{
+                background: "var(--brand-badge)",
+                color: "var(--brand-badge-text)",
+              }}
+            >
+              K
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.24em]" style={{ color: "var(--color-amber-soft)" }}>
+                Initializing Workspace
+              </div>
+              <span className="mt-1 block text-sm" style={{ color: "var(--color-ink-soft)" }}>
+                正在调度知识库与会话上下文...
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="h-full flex">
-      <Sidebar
-        conversations={conversations}
-        activeId={activeId}
-        currentModelLabel={getChatModelOption(selectedModelId).shortLabel}
-        onSelect={handleSelectConversation}
-        onNew={handleNewConversation}
-        onDelete={handleDeleteConversation}
+    <div className="relative h-full overflow-hidden">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-[-10%] top-[-16%] h-[28rem] w-[28rem] rounded-full blur-3xl" style={{ background: "var(--shell-orb-a)" }} />
+        <div className="absolute right-[-8%] top-[8%] h-[34rem] w-[34rem] rounded-full blur-3xl" style={{ background: "var(--shell-orb-b)" }} />
+        <div className="absolute bottom-[-18%] left-[28%] h-[30rem] w-[30rem] rounded-full blur-3xl" style={{ background: "var(--shell-orb-c)" }} />
+      </div>
+
+      <div className="relative h-full p-3 md:p-4">
+        <div
+          className="panel-surface flex h-full overflow-hidden rounded-[34px]"
+          style={{
+            background: "var(--shell-surface)",
+            backdropFilter: "blur(22px)",
+          }}
+        >
+          <Sidebar
+            conversations={conversations}
+            activeId={activeId}
+            onSelect={handleSelectConversation}
+            onNew={handleNewConversation}
+            onDelete={handleDeleteConversation}
+          />
+          <ChatArea
+            messages={activeConvo?.messages || []}
+            files={activeFiles}
+            isStreaming={isStreaming}
+            isGeneratingReport={isGeneratingReport}
+            canGenerateReport={Boolean(activeConvo && activeConvo.messages.length > 0)}
+            onSend={handleSend}
+            onUpload={handleUpload}
+            onToggleFile={handleToggleFile}
+            onDeleteFile={handleDeleteFile}
+            onGenerateReport={handleGenerateReport}
+            selectedModelId={selectedModelId}
+            onModelChange={setSelectedModelId}
+            selectedAnswerMode={selectedAnswerMode}
+            onAnswerModeChange={setSelectedAnswerMode}
+            selectedKnowledgeMode={selectedKnowledgeMode}
+            onKnowledgeModeChange={setSelectedKnowledgeMode}
+            themeMode={themeMode}
+            onThemeToggle={() => setThemeMode((prev) => (prev === "dark" ? "light" : "dark"))}
+            roleName={roleName}
+            onRoleClick={() => setShowRoleModal(true)}
+            isUploading={isUploading}
+            uploadStatus={uploadStatus}
+          />
+        </div>
+      </div>
+      {showRoleModal && <RoleSelector onSelect={handleRoleSelect} />}
+      <ReportPreviewModal
+        open={isReportModalOpen}
+        report={activeReport}
+        loading={isGeneratingReport}
+        error={reportError}
+        onClose={() => setIsReportModalOpen(false)}
+        onRetry={handleGenerateReport}
       />
-      <ChatArea
-        messages={activeConvo?.messages || []}
-        files={activeFiles}
-        isStreaming={isStreaming}
-        onSend={handleSend}
-        onUpload={handleUpload}
-        onToggleFile={handleToggleFile}
-        onDeleteFile={handleDeleteFile}
-        selectedModelId={selectedModelId}
-        onModelChange={setSelectedModelId}
-        selectedAnswerMode={selectedAnswerMode}
-        onAnswerModeChange={setSelectedAnswerMode}
-        roleName={roleName}
-        onRoleClick={() => setShowRoleModal(true)}
-        isUploading={isUploading}
-        uploadStatus={uploadStatus}
-      />
-      {showRoleModal && (
-        <RoleSelector onSelect={handleRoleSelect} />
-      )}
     </div>
   );
 }

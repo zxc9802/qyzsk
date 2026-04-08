@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import type { KnowledgeBaseHit } from "@/lib/types";
 
-type KnowledgeBaseEntry = {
+export type KnowledgeBaseEntry = {
   id: string;
   title: string;
   category: string;
@@ -70,7 +70,7 @@ const ROLE_LABELS: Record<string, string[]> = {
 
 let kbCache: KnowledgeBaseEntry[] | null = null;
 
-function getKnowledgeBaseEntries(): KnowledgeBaseEntry[] {
+export function getKnowledgeBaseEntries(): KnowledgeBaseEntry[] {
   if (kbCache) return kbCache;
 
   const kbPath = path.join(process.cwd(), "lib", "kb-content.txt");
@@ -142,7 +142,7 @@ function splitValue(value?: string): string[] {
     .filter(Boolean);
 }
 
-function buildQuerySignals(query: string): QuerySignals {
+export function buildKnowledgeBaseQuerySignals(query: string): QuerySignals {
   const normalizedQuery = normalize(query);
   const phraseSet = new Set<string>();
   const looseTermSet = new Set<string>();
@@ -243,7 +243,7 @@ function scoreEntry(entry: KnowledgeBaseEntry, signals: QuerySignals, role: stri
   return score;
 }
 
-function selectEntries(
+export function selectKnowledgeBaseEntries(
   entries: KnowledgeBaseEntry[],
   signals: QuerySignals,
   role: string
@@ -299,7 +299,7 @@ function buildEntryBlock(entry: KnowledgeBaseEntry): string {
   return lines.join("\n");
 }
 
-function toKnowledgeBaseHit(entry: KnowledgeBaseEntry): KnowledgeBaseHit {
+export function toKnowledgeBaseHit(entry: KnowledgeBaseEntry): KnowledgeBaseHit {
   return {
     id: entry.id,
     title: entry.title,
@@ -307,12 +307,47 @@ function toKnowledgeBaseHit(entry: KnowledgeBaseEntry): KnowledgeBaseHit {
   };
 }
 
+export function buildKnowledgeBaseContextFromEntries(entries: KnowledgeBaseEntry[]): string {
+  if (entries.length === 0) {
+    return "";
+  }
+
+  const blocks: string[] = [];
+  let remainingBudget = MAX_KB_CONTEXT_CHARS;
+
+  for (const entry of entries) {
+    const block = buildEntryBlock(entry);
+    if (block.length > remainingBudget && blocks.length > 0) break;
+    blocks.push(block);
+    remainingBudget -= block.length;
+  }
+
+  if (blocks.length === 0) {
+    return "";
+  }
+
+  return [
+    "以下是从公司知识库中检索出的高相关条目。请优先依据这些条目回答。",
+    "如果这些条目不足以直接支持结论，请明确说明信息还不够，不要编造公司规则。",
+    "不要把 KB 编号、条目 ID 或内部标签原样展示给用户。",
+    "",
+    blocks.join("\n\n---\n\n"),
+  ].join("\n");
+}
+
+export function getKnowledgeBaseEntriesByIds(ids: string[]): KnowledgeBaseEntry[] {
+  if (ids.length === 0) return [];
+
+  const idSet = new Set(ids);
+  return getKnowledgeBaseEntries().filter((entry) => idSet.has(entry.id));
+}
+
 export function buildKnowledgeBaseRetrieval(query: string, role: string): {
   context: string;
   hits: KnowledgeBaseHit[];
 } {
-  const signals = buildQuerySignals(query);
-  const selectedEntries = selectEntries(getKnowledgeBaseEntries(), signals, role);
+  const signals = buildKnowledgeBaseQuerySignals(query);
+  const selectedEntries = selectKnowledgeBaseEntries(getKnowledgeBaseEntries(), signals, role);
 
   if (selectedEntries.length === 0) {
     return {
@@ -341,17 +376,15 @@ export function buildKnowledgeBaseRetrieval(query: string, role: string): {
   }
 
   return {
-    context: [
-      "以下是从公司知识库中检索出的高相关条目。请优先依据这些条目回答。",
-      "如果这些条目不足以直接支持结论，请明确说明信息还不够，不要编造公司规则。",
-      "不要把 KB 编号、条目 ID 或内部标签原样展示给用户。",
-      "",
-      blocks.join("\n\n---\n\n"),
-    ].join("\n"),
+    context: buildKnowledgeBaseContextFromEntries(selectedEntries),
     hits: includedHits,
   };
 }
 
 export function buildKnowledgeBaseContext(query: string, role: string): string {
   return buildKnowledgeBaseRetrieval(query, role).context;
+}
+
+export function selectKnowledgeBaseEntriesByQuery(query: string, role: string): KnowledgeBaseEntry[] {
+  return selectKnowledgeBaseEntries(getKnowledgeBaseEntries(), buildKnowledgeBaseQuerySignals(query), role);
 }
