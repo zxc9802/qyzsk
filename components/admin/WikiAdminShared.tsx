@@ -165,7 +165,7 @@ export function useWikiAdminOverview() {
 
   async function submitIngest() {
     if (!ingestContent.trim()) {
-      setError("请先填写要进入 Wiki 审核流的资料内容。");
+      setError("请先填写要发布的资料内容。");
       return;
     }
 

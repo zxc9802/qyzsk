@@ -8,6 +8,13 @@ const DEFAULT_UNAUTHORIZED_MESSAGE = "请先从主官网登录后再进入该机
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
 
 export type AppSessionUser = Record<string, unknown>;
+export type AppSessionUserSnapshot = {
+  userId: string;
+  account?: string;
+  nickname?: string;
+  role?: string;
+  groupName?: string;
+};
 
 export type AppSession = {
   token: string;
@@ -386,14 +393,42 @@ export function getAppSessionUserId(session: AppSession | null) {
   return userId || null;
 }
 
+export function buildAppSessionUserSnapshot(session: AppSession | null): AppSessionUserSnapshot | null {
+  const userId = getAppSessionUserId(session);
+  if (!userId) return null;
+
+  const user = session?.user || {};
+  const snapshot: AppSessionUserSnapshot = { userId };
+
+  const account = typeof user.account === "string"
+    ? user.account.trim()
+    : typeof user.email === "string"
+      ? user.email.trim()
+      : "";
+  if (account) snapshot.account = account;
+
+  const nickname = typeof user.nickname === "string" ? user.nickname.trim() : "";
+  if (nickname) snapshot.nickname = nickname;
+
+  const role = typeof user.role === "string" ? user.role.trim() : "";
+  if (role) snapshot.role = role;
+
+  const groupName = typeof user.groupName === "string" ? user.groupName.trim() : "";
+  if (groupName) snapshot.groupName = groupName;
+
+  return snapshot;
+}
+
 export async function assertAppUserSession(request: Pick<Request, "url" | "headers">) {
   const session = await assertAppSession(request);
-  const userId = getAppSessionUserId(session);
+  const user = buildAppSessionUserSnapshot(session);
+  const userId = user?.userId || null;
 
   if (userId) {
     return {
       session,
       userId,
+      user,
     };
   }
 
@@ -401,6 +436,11 @@ export async function assertAppUserSession(request: Pick<Request, "url" | "heade
     return {
       session,
       userId: "kb-chat-local-dev-user",
+      user: {
+        userId: "kb-chat-local-dev-user",
+        nickname: "本地调试用户",
+        role: "admin",
+      } satisfies AppSessionUserSnapshot,
     };
   }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useAppViewer } from "@/lib/client/app-session";
 import { Conversation } from "@/lib/types";
 
 interface SidebarProps {
@@ -19,6 +20,7 @@ export default function Sidebar({
   onDelete,
 }: SidebarProps) {
   const sorted = [...conversations].sort((a, b) => b.updatedAt - a.updatedAt);
+  const { isAdmin } = useAppViewer();
 
   return (
     <aside
@@ -181,7 +183,7 @@ export default function Sidebar({
             color: "var(--color-sidebar-text-bright)",
           }}
         >
-          打开知识审核台
+          {isAdmin ? "打开知识审核台" : "打开知识发布台"}
         </Link>
       </div>
 

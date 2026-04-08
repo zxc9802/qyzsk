@@ -1,3 +1,5 @@
+import { promises as fs } from "fs";
+import path from "path";
 import {
   DEFAULT_ANSWER_MODE,
   isAnswerMode,
@@ -24,9 +26,11 @@ import type {
   UserSettings,
 } from "@/lib/types";
 import { withDbClient } from "@/lib/server/db";
+import { STORAGE_ROOT } from "@/lib/server/file-store";
 
 const DEFAULT_CONVERSATION_TITLE = "新对话";
 const LOCAL_DEV_USER_ID = "kb-chat-local-dev-user";
+const LOCAL_STATE_ROOT = path.join(STORAGE_ROOT, "state");
 
 type ConversationRow = {
   id: string;
@@ -57,6 +61,13 @@ type SaveStateResult = {
   deletedConversationIds: string[];
 };
 
+type LocalStateRecord = {
+  conversations: Conversation[];
+  activeId: string | null;
+  settings: UserSettings | null;
+  updatedAtMs: number;
+};
+
 function normalizeTrimmedString(value: unknown, maxLength = 4000) {
   if (typeof value !== "string") return "";
   return value.trim().slice(0, maxLength);
@@ -79,6 +90,30 @@ function normalizeTimestamp(value: unknown, fallbackValue: number) {
 
 function normalizeId(value: unknown) {
   return normalizeTrimmedString(value, 160);
+}
+
+function shouldUseLocalStateStore() {
+  return process.env.NODE_ENV !== "production" && !process.env.DATABASE_URL?.trim();
+}
+
+function sanitizeStorageSegment(value: string) {
+  return normalizeId(value) || "default";
+}
+
+function localStatePath(userId: string) {
+  return path.join(LOCAL_STATE_ROOT, sanitizeStorageSegment(userId), "chat-state.json");
+}
+
+async function ensureLocalStateDir(userId: string) {
+  await fs.mkdir(path.dirname(localStatePath(userId)), { recursive: true });
+}
+
+async function writeLocalState(userId: string, state: LocalStateRecord) {
+  const filePath = localStatePath(userId);
+  await ensureLocalStateDir(userId);
+  const tempPath = `${filePath}.tmp-${Date.now()}`;
+  await fs.writeFile(tempPath, JSON.stringify(state, null, 2), "utf8");
+  await fs.rename(tempPath, filePath);
 }
 
 function sanitizeKnowledgeHit(value: unknown): KnowledgeBaseHit | null {
@@ -346,6 +381,55 @@ function deserializeSettings(row: UserStateRow | undefined): UserSettings | null
   });
 }
 
+function toChatStatePayload(state: LocalStateRecord): ChatStatePayload {
+  return {
+    conversations: state.conversations,
+    activeId: state.activeId,
+    settings: state.settings,
+  };
+}
+
+function sanitizeLocalState(value: unknown): LocalStateRecord {
+  const candidate = value && typeof value === "object" ? value as Partial<LocalStateRecord> : {};
+  const fallbackTimestamp = Date.now();
+  const conversations = Array.isArray(candidate.conversations)
+    ? candidate.conversations
+        .map((item) => sanitizeConversation(item, fallbackTimestamp))
+        .filter((item): item is Conversation => Boolean(item))
+        .sort((left, right) => right.updatedAt - left.updatedAt)
+    : [];
+  const rawActiveId = normalizeId(candidate.activeId);
+  const activeId = conversations.some((conversation) => conversation.id === rawActiveId)
+    ? rawActiveId
+    : conversations[0]?.id ?? null;
+
+  return {
+    conversations,
+    activeId,
+    settings: sanitizeSettings(candidate.settings),
+    updatedAtMs: normalizeTimestamp(candidate.updatedAtMs, 0),
+  };
+}
+
+async function readLocalState(userId: string): Promise<LocalStateRecord> {
+  try {
+    const raw = await fs.readFile(localStatePath(userId), "utf8");
+    return sanitizeLocalState(JSON.parse(raw));
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === "ENOENT") {
+      return {
+        conversations: [],
+        activeId: null,
+        settings: null,
+        updatedAtMs: 0,
+      };
+    }
+
+    throw error;
+  }
+}
+
 export function getLocalDevUserId() {
   return LOCAL_DEV_USER_ID;
 }
@@ -355,6 +439,10 @@ export function parseChatStateSavePayload(body: unknown) {
 }
 
 export async function getUserChatState(userId: string): Promise<ChatStatePayload> {
+  if (shouldUseLocalStateStore()) {
+    return toChatStatePayload(await readLocalState(userId));
+  }
+
   return withDbClient(async (client) => {
     const [conversationsResult, userStateResult] = await Promise.all([
       client.query<ConversationRow>(
@@ -395,6 +483,49 @@ export async function saveUserChatState(userId: string, input: unknown): Promise
   const normalized = normalizeStatePayload(input);
   const activeId = normalized.activeId;
   const settings = normalized.settings;
+
+  if (shouldUseLocalStateStore()) {
+    const currentState = await readLocalState(userId);
+
+    if (currentState.updatedAtMs > normalized.clientUpdatedAt) {
+      return {
+        state: toChatStatePayload(currentState),
+        deletedConversationIds: [],
+      };
+    }
+
+    const incomingConversationIds = normalized.conversations.map((conversation) => conversation.id);
+    const preservedConversations = currentState.conversations.filter(
+      (conversation) =>
+        !incomingConversationIds.includes(conversation.id) &&
+        conversation.updatedAt > normalized.clientUpdatedAt
+    );
+    const deletedConversationIds = currentState.conversations
+      .filter(
+        (conversation) =>
+          !incomingConversationIds.includes(conversation.id) &&
+          conversation.updatedAt <= normalized.clientUpdatedAt
+      )
+      .map((conversation) => conversation.id);
+    const conversations = [...normalized.conversations, ...preservedConversations]
+      .sort((left, right) => right.updatedAt - left.updatedAt);
+    const resolvedActiveId = conversations.some((conversation) => conversation.id === activeId)
+      ? activeId
+      : conversations[0]?.id ?? null;
+    const nextState: LocalStateRecord = {
+      conversations,
+      activeId: resolvedActiveId,
+      settings,
+      updatedAtMs: normalized.clientUpdatedAt,
+    };
+
+    await writeLocalState(userId, nextState);
+
+    return {
+      state: toChatStatePayload(nextState),
+      deletedConversationIds,
+    };
+  }
 
   return withDbClient(async (client) => {
     await client.query("BEGIN");
@@ -538,6 +669,37 @@ export async function ensureConversationRecord(userId: string, conversationId: s
 
   const now = Date.now();
   const normalizedTitle = normalizeTrimmedString(title, 300) || DEFAULT_CONVERSATION_TITLE;
+
+  if (shouldUseLocalStateStore()) {
+    const currentState = await readLocalState(userId);
+    const existingConversation = currentState.conversations.find(
+      (conversation) => conversation.id === normalizedConversationId
+    );
+
+    if (existingConversation) {
+      return;
+    }
+
+    const nextConversations = [
+      {
+        id: normalizedConversationId,
+        title: normalizedTitle,
+        messages: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+      ...currentState.conversations,
+    ].sort((left, right) => right.updatedAt - left.updatedAt);
+    const nextState: LocalStateRecord = {
+      conversations: nextConversations,
+      activeId: currentState.activeId ?? normalizedConversationId,
+      settings: currentState.settings,
+      updatedAtMs: Math.max(currentState.updatedAtMs, now),
+    };
+
+    await writeLocalState(userId, nextState);
+    return;
+  }
 
   await withDbClient(async (client) => {
     await client.query(

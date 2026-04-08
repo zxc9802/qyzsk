@@ -667,6 +667,7 @@ export default function Home() {
             onDelete={handleDeleteConversation}
           />
           <ChatArea
+            conversationId={activeId}
             messages={activeConvo?.messages || []}
             files={activeFiles}
             isStreaming={isStreaming}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { AnswerMode } from "@/lib/answer-modes";
 import { ChatModelId } from "@/lib/chat-models";
 import { ThemeMode } from "@/lib/theme";
@@ -10,6 +10,7 @@ import EmptyState from "./EmptyState";
 import InputBar from "./InputBar";
 
 interface ChatAreaProps {
+  conversationId: string | null;
   messages: Message[];
   files: ConversationFile[];
   isStreaming: boolean;
@@ -33,6 +34,7 @@ interface ChatAreaProps {
 }
 
 export default function ChatArea({
+  conversationId,
   messages,
   files,
   isStreaming,
@@ -55,12 +57,45 @@ export default function ChatArea({
   uploadStatus,
 }: ChatAreaProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollPositionsRef = useRef<Record<string, number>>({});
+  const previousConversationIdRef = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    if (!container || !conversationId) {
+      previousConversationIdRef.current = conversationId;
+      return;
+    }
+
+    if (previousConversationIdRef.current !== conversationId) {
+      const savedScrollTop = scrollPositionsRef.current[conversationId];
+      container.scrollTop = typeof savedScrollTop === "number" ? savedScrollTop : container.scrollHeight;
+    }
+
+    previousConversationIdRef.current = conversationId;
+  }, [conversationId]);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (!conversationId || messages.length === 0) {
+      return;
     }
-  }, [messages]);
+
+    const container = scrollRef.current;
+    if (!container) {
+      return;
+    }
+
+    const handleScroll = () => {
+      scrollPositionsRef.current[conversationId] = container.scrollTop;
+    };
+
+    handleScroll();
+    container.addEventListener("scroll", handleScroll);
+
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+    };
+  }, [conversationId, messages.length]);
 
   const isEmpty = messages.length === 0;
 

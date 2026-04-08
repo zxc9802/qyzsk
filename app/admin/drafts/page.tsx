@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AdminErrorBanner,
   AdminPageHeader,
@@ -12,10 +13,24 @@ import {
   formatDate,
   useWikiAdminOverview,
 } from "@/components/admin/WikiAdminShared";
+import { useAppViewer } from "@/lib/client/app-session";
 import { getWikiCategoryLabel } from "@/lib/wiki-category-labels";
 import type { WikiCategory } from "@/lib/wiki-types";
 
+function formatSubmitterLabel(
+  submittedBy?: {
+    nickname?: string;
+    account?: string;
+    userId?: string;
+  }
+) {
+  if (!submittedBy) return "未记录";
+  return submittedBy.nickname || submittedBy.account || submittedBy.userId || "未记录";
+}
+
 export default function AdminDraftsPage() {
+  const router = useRouter();
+  const { loading: sessionLoading, isAdmin } = useAppViewer();
   const {
     adminToken,
     persistToken,
@@ -37,6 +52,24 @@ export default function AdminDraftsPage() {
     () => [...activeDrafts].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
     [activeDrafts]
   );
+
+  useEffect(() => {
+    if (!sessionLoading && !isAdmin) {
+      router.replace("/admin");
+    }
+  }, [isAdmin, router, sessionLoading]);
+
+  if (sessionLoading || !isAdmin) {
+    return (
+      <div className="h-screen overflow-y-auto px-4 py-5 md:px-8 md:py-8">
+        <div className="mx-auto max-w-5xl">
+          <div className="panel-surface rounded-[28px] px-6 py-8 text-sm" style={{ color: "var(--color-ink-soft)" }}>
+            正在返回知识发布台...
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen overflow-y-auto px-4 py-5 md:px-8 md:py-8">
@@ -118,8 +151,9 @@ export default function AdminDraftsPage() {
                       <div className="text-[11px] uppercase tracking-[0.24em]" style={{ color: "var(--color-amber-soft)" }}>
                         Draft · {draft.id}
                       </div>
-                      <div className="mt-2 text-sm" style={{ color: "var(--color-ink-muted)" }}>
-                        来源：{draft.sourceId} · 更新时间：{formatDate(draft.updatedAt)}
+                      <div className="mt-2 space-y-1 text-sm" style={{ color: "var(--color-ink-muted)" }}>
+                        <div>来源：{draft.sourceId} · 更新时间：{formatDate(draft.updatedAt)}</div>
+                        <div>提交人：{formatSubmitterLabel(draft.submittedBy)}</div>
                       </div>
                     </div>
                     <div

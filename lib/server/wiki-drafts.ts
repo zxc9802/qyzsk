@@ -1,6 +1,6 @@
 import { DEFAULT_CHAT_MODEL_ID } from "@/lib/chat-models";
 import { generateModelText } from "@/lib/server/model-text";
-import type { WikiCategory, WikiDraft } from "@/lib/wiki-types";
+import type { WikiCategory, WikiDraft, WikiSubmitter } from "@/lib/wiki-types";
 import {
   createWikiDraft,
   createWikiSourceRecord,
@@ -132,10 +132,12 @@ export async function ingestWikiSource(options: {
   title: string;
   content: string;
   modelId?: string;
+  submittedBy?: WikiSubmitter;
 }) {
   const source = await createWikiSourceRecord({
     title: options.title,
     content: options.content,
+    submittedBy: options.submittedBy,
   });
 
   const payload = await generateDraftPayload({
@@ -148,6 +150,7 @@ export async function ingestWikiSource(options: {
   const resolvedCategory = payload.category || heuristicCategory(source.title, source.content);
   const draft = await createWikiDraft({
     sourceId: source.id,
+    submittedBy: options.submittedBy,
     title: resolvedTitle,
     category: resolvedCategory,
     summary: payload.summary?.trim() || "待补充摘要",

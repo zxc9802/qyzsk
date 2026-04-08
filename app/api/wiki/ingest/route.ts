@@ -1,17 +1,15 @@
 import { NextRequest } from "next/server";
-import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
+import { appSessionErrorResponse, assertAppUserSession } from "@/lib/server/app-session";
 import { ingestWikiSource } from "@/lib/server/wiki-drafts";
+import { applyWikiDraftAction } from "@/lib/server/wiki-review";
+import { readWikiSourceRecord } from "@/lib/server/wiki-store";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    await assertWikiAdminAccess();
-  } catch (error) {
-    return wikiAdminAuthErrorResponse(error instanceof Error ? error.message : "Wiki 管理权限校验失败。");
-  }
-
-  try {
+    const { user } = await assertAppUserSession(req);
+    const isAdmin = user?.role === "admin";
     const body = await req.json();
     const title = typeof body.title === "string" ? body.title.trim() : "";
     const content = typeof body.content === "string" ? body.content.trim() : "";
@@ -28,14 +26,45 @@ export async function POST(req: NextRequest) {
       title: title || "未命名资料",
       content,
       modelId,
+      submittedBy: user || undefined,
     });
 
-    return new Response(JSON.stringify(result), {
-      headers: { "Content-Type": "application/json" },
-    });
+    if (isAdmin) {
+      const approvedDraft = await applyWikiDraftAction(result.draft.id, "approve", {});
+      const approvedSource = await readWikiSourceRecord(result.source.id);
+
+      return new Response(
+        JSON.stringify({
+          ...result,
+          source: approvedSource || {
+            ...result.source,
+            status: "approved",
+          },
+          draft: approvedDraft,
+          autoApproved: true,
+          message: "管理员提交的知识已直接发布，无需进入审核队列。",
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        ...result,
+        autoApproved: false,
+      }),
+      {
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   } catch (error) {
+    if (error instanceof Error && error.name === "AppSessionUnauthorizedError") {
+      return appSessionErrorResponse(error, req);
+    }
     console.error("Wiki ingest error:", error);
-    return new Response(JSON.stringify({ error: "生成 Wiki 草稿失败。" }), {
+    return new Response(JSON.stringify({ error: "提交知识失败。" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });

@@ -8,6 +8,7 @@ import type {
   WikiSourceRecord,
   WikiSourceStatus,
   WikiStats,
+  WikiSubmitter,
 } from "@/lib/wiki-types";
 
 const PUBLISHED_ROOT = path.join(process.cwd(), "wiki");
@@ -76,6 +77,41 @@ function sourcePath(sourceId: string) {
 
 function normalizeLookupValue(value: string) {
   return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeSubmitter(value: unknown): WikiSubmitter | undefined {
+  if (!value || typeof value !== "object") return undefined;
+
+  const candidate = value as WikiSubmitter;
+  const userId = typeof candidate.userId === "string" ? candidate.userId.trim() : "";
+  if (!userId) return undefined;
+
+  const submitter: WikiSubmitter = { userId };
+  const account = typeof candidate.account === "string" ? candidate.account.trim() : "";
+  const nickname = typeof candidate.nickname === "string" ? candidate.nickname.trim() : "";
+  const role = typeof candidate.role === "string" ? candidate.role.trim() : "";
+  const groupName = typeof candidate.groupName === "string" ? candidate.groupName.trim() : "";
+
+  if (account) submitter.account = account;
+  if (nickname) submitter.nickname = nickname;
+  if (role) submitter.role = role;
+  if (groupName) submitter.groupName = groupName;
+
+  return submitter;
+}
+
+function normalizeWikiSourceRecord(record: WikiSourceRecord): WikiSourceRecord {
+  return {
+    ...record,
+    submittedBy: normalizeSubmitter(record.submittedBy),
+  };
+}
+
+function normalizeWikiDraftRecord(draft: WikiDraft): WikiDraft {
+  return {
+    ...draft,
+    submittedBy: normalizeSubmitter(draft.submittedBy),
+  };
 }
 
 function publishedFilePath(pageId: string) {
@@ -374,6 +410,7 @@ export async function appendWikiLog(entry: string) {
 export async function createWikiSourceRecord(input: {
   title: string;
   content: string;
+  submittedBy?: WikiSubmitter;
 }): Promise<WikiSourceRecord> {
   await ensureWikiWorkspace();
   const source: WikiSourceRecord = {
@@ -382,6 +419,7 @@ export async function createWikiSourceRecord(input: {
     content: input.content.trim(),
     status: "drafted",
     draftIds: [],
+    submittedBy: normalizeSubmitter(input.submittedBy),
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -390,7 +428,8 @@ export async function createWikiSourceRecord(input: {
 }
 
 export async function readWikiSourceRecord(sourceId: string): Promise<WikiSourceRecord | null> {
-  return readJson<WikiSourceRecord | null>(sourcePath(sourceId), null);
+  const source = await readJson<WikiSourceRecord | null>(sourcePath(sourceId), null);
+  return source ? normalizeWikiSourceRecord(source) : null;
 }
 
 export async function findWikiSourceRecordByTitle(title: string): Promise<WikiSourceRecord | null> {
@@ -411,6 +450,7 @@ export async function listWikiSourceRecords(): Promise<WikiSourceRecord[]> {
 
     return records
       .filter((item): item is WikiSourceRecord => Boolean(item))
+      .map(normalizeWikiSourceRecord)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
@@ -474,6 +514,7 @@ export async function createWikiDraft(input: Omit<WikiDraft, "id" | "createdAt" 
   await ensureWikiWorkspace();
   const draft: WikiDraft = {
     ...input,
+    submittedBy: normalizeSubmitter(input.submittedBy),
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
     createdAt: nowIso(),
     updatedAt: nowIso(),
@@ -487,7 +528,8 @@ export async function createWikiDraft(input: Omit<WikiDraft, "id" | "createdAt" 
 }
 
 export async function readWikiDraft(draftId: string): Promise<WikiDraft | null> {
-  return readJson<WikiDraft | null>(draftPath(draftId), null);
+  const draft = await readJson<WikiDraft | null>(draftPath(draftId), null);
+  return draft ? normalizeWikiDraftRecord(draft) : null;
 }
 
 function normalizePageId(pageId: string) {
@@ -517,6 +559,7 @@ export async function listWikiDrafts(): Promise<WikiDraft[]> {
 
     return drafts
       .filter((item): item is WikiDraft => Boolean(item))
+      .map(normalizeWikiDraftRecord)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
@@ -529,6 +572,16 @@ export async function findWikiDraftByPageId(pageId: string): Promise<WikiDraft |
   const normalizedPageId = normalizePageId(pageId);
   const drafts = await listWikiDrafts();
   return drafts.find((draft) => resolveDraftPageIds(draft).has(normalizedPageId)) || null;
+}
+
+export async function listWikiDraftsBySubmitter(userId: string): Promise<WikiDraft[]> {
+  const drafts = await listWikiDrafts();
+  return drafts.filter((draft) => draft.submittedBy?.userId === userId);
+}
+
+export async function listWikiSourceRecordsBySubmitter(userId: string): Promise<WikiSourceRecord[]> {
+  const sources = await listWikiSourceRecords();
+  return sources.filter((source) => source.submittedBy?.userId === userId);
 }
 
 export async function updateWikiDraft(

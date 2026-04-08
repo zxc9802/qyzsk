@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import WikiPublisherDashboard from "@/components/admin/WikiPublisherDashboard";
 import {
   AdminErrorBanner,
   AdminPageHeader,
@@ -9,6 +10,7 @@ import {
   CHAT_MODELS,
   useWikiAdminOverview,
 } from "@/components/admin/WikiAdminShared";
+import { useAppViewer } from "@/lib/client/app-session";
 import type { ChatModelId } from "@/lib/chat-models";
 
 function EntryCard(props: {
@@ -51,7 +53,7 @@ function EntryCard(props: {
   );
 }
 
-export default function AdminPage() {
+function AdminDashboard() {
   const {
     adminToken,
     persistToken,
@@ -121,11 +123,14 @@ export default function AdminPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-[11px] uppercase tracking-[0.24em]" style={{ color: "var(--color-amber-soft)" }}>
-                Ingest Draft
+                Publish Knowledge
               </div>
               <h2 className="mt-2 text-xl font-semibold" style={{ color: "var(--color-sidebar-text-bright)" }}>
-                提交候选知识
+                管理员直发知识
               </h2>
+              <p className="mt-3 max-w-2xl text-sm leading-7" style={{ color: "var(--color-ink-soft)" }}>
+                管理员在这里提交的内容会直接发布到正式 Wiki，不进入待审核草稿队列。普通成员提交的候选知识仍然需要审核。
+              </p>
             </div>
             <div className="relative">
               <select
@@ -169,7 +174,7 @@ export default function AdminPage() {
             <textarea
               value={ingestContent}
               onChange={(event) => setIngestContent(event.target.value)}
-              placeholder="粘贴原始资料内容。这里提交的是候选知识，不会直接写入正式 Wiki。"
+              placeholder="粘贴原始资料内容。管理员提交后会直接写入正式 Wiki。"
               rows={10}
               className="rounded-[22px] border px-4 py-4 text-sm leading-7 outline-none"
               style={{
@@ -189,7 +194,7 @@ export default function AdminPage() {
                   opacity: submittingIngest || !adminToken.trim() ? 0.6 : 1,
                 }}
               >
-                {submittingIngest ? "正在生成草稿..." : "提交到审核流"}
+                {submittingIngest ? "正在发布..." : "直接发布知识"}
               </button>
             </div>
           </div>
@@ -205,7 +210,8 @@ export default function AdminPage() {
             </h2>
             <ol className="mt-4 space-y-3 text-sm leading-7" style={{ color: "var(--color-ink-soft)" }}>
               {[
-                "先把原始资料提交成候选知识，系统会生成草稿。",
+                "管理员在本页提交资料后，系统会直接发布到正式 Wiki。",
+                "普通成员提交资料后，系统会先生成候选草稿。",
                 "进入“待审核草稿”页面逐条检查标题、分类、来源、正文和备注。",
                 "审核通过后写入正式 Wiki，再到“已发布页面”查看最终结果。",
               ].map((item, index) => (
@@ -260,4 +266,42 @@ export default function AdminPage() {
       </div>
     </div>
   );
+}
+
+export default function AdminPage() {
+  const { viewer, loading, error, isAdmin } = useAppViewer();
+
+  if (loading) {
+    return (
+      <div className="h-screen overflow-y-auto px-4 py-5 md:px-8 md:py-8">
+        <div className="mx-auto max-w-5xl">
+          <div className="panel-surface rounded-[28px] px-6 py-8 text-sm" style={{ color: "var(--color-ink-soft)" }}>
+            正在识别当前账号的知识台权限...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="h-screen overflow-y-auto px-4 py-5 md:px-8 md:py-8">
+        <div className="mx-auto max-w-5xl space-y-4">
+          <AdminPageHeader
+            title="知识台"
+            description="读取当前账号权限时出现问题，请刷新页面后重试。"
+            backHref="/"
+            backLabel="返回聊天"
+          />
+          <AdminErrorBanner error={error} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return <WikiPublisherDashboard viewer={viewer} />;
+  }
+
+  return <AdminDashboard />;
 }

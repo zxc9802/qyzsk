@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AdminErrorBanner,
   AdminPageHeader,
@@ -9,9 +11,12 @@ import {
   formatDate,
   useWikiAdminOverview,
 } from "@/components/admin/WikiAdminShared";
+import { useAppViewer } from "@/lib/client/app-session";
 import { getWikiCategoryLabel } from "@/lib/wiki-category-labels";
 
 export default function AdminPublishedPage() {
+  const router = useRouter();
+  const { loading: sessionLoading, isAdmin } = useAppViewer();
   const {
     adminToken,
     persistToken,
@@ -22,6 +27,24 @@ export default function AdminPublishedPage() {
     draftCount,
     publishedPages,
   } = useWikiAdminOverview();
+
+  useEffect(() => {
+    if (!sessionLoading && !isAdmin) {
+      router.replace("/admin");
+    }
+  }, [isAdmin, router, sessionLoading]);
+
+  if (sessionLoading || !isAdmin) {
+    return (
+      <div className="h-screen overflow-y-auto px-4 py-5 md:px-8 md:py-8">
+        <div className="mx-auto max-w-5xl">
+          <div className="panel-surface rounded-[28px] px-6 py-8 text-sm" style={{ color: "var(--color-ink-soft)" }}>
+            正在返回知识发布台...
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen overflow-y-auto px-4 py-5 md:px-8 md:py-8">

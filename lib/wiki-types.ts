@@ -2,6 +2,14 @@ export type WikiCategory = "concepts" | "entities" | "roles" | "faq" | "synthesi
 export type WikiDraftStatus = "draft" | "approved" | "rejected";
 export type WikiSourceStatus = "drafted" | "approved" | "rejected";
 
+export interface WikiSubmitter {
+  userId: string;
+  account?: string;
+  nickname?: string;
+  role?: string;
+  groupName?: string;
+}
+
 export interface WikiPage {
   id: string;
   title: string;
@@ -23,6 +31,7 @@ export interface WikiPageSearchDocument extends WikiPage {
 export interface WikiDraft {
   id: string;
   sourceId: string;
+  submittedBy?: WikiSubmitter;
   title: string;
   category: WikiCategory;
   summary: string;
@@ -43,6 +52,7 @@ export interface WikiSourceRecord {
   content: string;
   status: WikiSourceStatus;
   draftIds: string[];
+  submittedBy?: WikiSubmitter;
   createdAt: string;
   updatedAt: string;
 }
