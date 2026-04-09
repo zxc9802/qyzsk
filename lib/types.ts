@@ -9,7 +9,7 @@ export interface KnowledgeBaseHit {
   category: string;
 }
 
-export type RetrievalSourceType = "wiki" | "knowledge_base" | "file";
+export type RetrievalSourceType = "wiki" | "knowledge_base" | "file" | "web";
 
 export interface RetrievalSourceHit {
   id: string;
@@ -19,6 +19,9 @@ export interface RetrievalSourceHit {
   detail?: string;
   excerpt?: string;
   score?: number;
+  url?: string;
+  siteName?: string;
+  publishedAt?: string;
 }
 
 export interface QuestionDiagnosis {
@@ -86,6 +89,7 @@ export interface UserSettings {
   answerMode?: AnswerMode;
   knowledgeMode?: KnowledgeMode;
   themeMode?: ThemeMode;
+  webSearchEnabled?: boolean;
 }
 
 export const ROLES = [

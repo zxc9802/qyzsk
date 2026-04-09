@@ -47,6 +47,7 @@ type UserStateRow = {
   answer_mode: string | null;
   knowledge_mode: string | null;
   theme_mode: string | null;
+  web_search_enabled: boolean | null;
   active_conversation_id: string | null;
 };
 
@@ -141,7 +142,7 @@ function sanitizeSourceHit(value: unknown): RetrievalSourceHit | null {
   const category = normalizeTrimmedString(candidate.category, 120);
 
   if (!id || !title || !category) return null;
-  if (!["wiki", "knowledge_base", "file"].includes(candidate.type)) return null;
+  if (!["wiki", "knowledge_base", "file", "web"].includes(candidate.type)) return null;
 
   const hit: RetrievalSourceHit = {
     id,
@@ -159,6 +160,15 @@ function sanitizeSourceHit(value: unknown): RetrievalSourceHit | null {
   if (typeof candidate.score === "number" && Number.isFinite(candidate.score)) {
     hit.score = candidate.score;
   }
+
+  const url = normalizeTrimmedString(candidate.url, 1600);
+  if (url) hit.url = url;
+
+  const siteName = normalizeTrimmedString(candidate.siteName, 200);
+  if (siteName) hit.siteName = siteName;
+
+  const publishedAt = normalizeTrimmedString(candidate.publishedAt, 120);
+  if (publishedAt) hit.publishedAt = publishedAt;
 
   return hit;
 }
@@ -316,6 +326,7 @@ function sanitizeSettings(value: unknown): UserSettings | null {
     typeof candidate.themeMode === "string" && isThemeMode(candidate.themeMode)
       ? candidate.themeMode
       : DEFAULT_THEME_MODE;
+  settings.webSearchEnabled = candidate.webSearchEnabled === true;
 
   return settings;
 }
@@ -378,6 +389,7 @@ function deserializeSettings(row: UserStateRow | undefined): UserSettings | null
     answerMode: row.answer_mode as AnswerMode | null,
     knowledgeMode: row.knowledge_mode as KnowledgeMode | null,
     themeMode: row.theme_mode as ThemeMode | null,
+    webSearchEnabled: row.web_search_enabled === true,
   });
 }
 
@@ -456,7 +468,7 @@ export async function getUserChatState(userId: string): Promise<ChatStatePayload
       ),
       client.query<UserStateRow>(
         `
-          SELECT role, role_name, chat_model_id, answer_mode, knowledge_mode, theme_mode, active_conversation_id
+          SELECT role, role_name, chat_model_id, answer_mode, knowledge_mode, theme_mode, web_search_enabled, active_conversation_id
           FROM kb_chat_user_state
           WHERE user_id = $1
           LIMIT 1
@@ -615,10 +627,11 @@ export async function saveUserChatState(userId: string, input: unknown): Promise
             answer_mode,
             knowledge_mode,
             theme_mode,
+            web_search_enabled,
             active_conversation_id,
             updated_at_ms
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
           ON CONFLICT (user_id)
           DO UPDATE SET
             role = EXCLUDED.role,
@@ -627,6 +640,7 @@ export async function saveUserChatState(userId: string, input: unknown): Promise
             answer_mode = EXCLUDED.answer_mode,
             knowledge_mode = EXCLUDED.knowledge_mode,
             theme_mode = EXCLUDED.theme_mode,
+            web_search_enabled = EXCLUDED.web_search_enabled,
             active_conversation_id = EXCLUDED.active_conversation_id,
             updated_at_ms = EXCLUDED.updated_at_ms
           WHERE EXCLUDED.updated_at_ms >= kb_chat_user_state.updated_at_ms
@@ -639,6 +653,7 @@ export async function saveUserChatState(userId: string, input: unknown): Promise
           settings?.answerMode ?? null,
           settings?.knowledgeMode ?? null,
           settings?.themeMode ?? null,
+          settings?.webSearchEnabled ?? false,
           activeId,
           normalized.clientUpdatedAt,
         ]

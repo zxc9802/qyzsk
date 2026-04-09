@@ -4,8 +4,14 @@ import { DEFAULT_CHAT_MODEL_ID, getChatModelOption, isChatModelId } from "@/lib/
 import { DEFAULT_KNOWLEDGE_MODE, isKnowledgeMode } from "@/lib/knowledge-mode";
 import { buildSimpleAnswerPrompt, buildSystemPrompt } from "@/lib/system-prompt";
 import { buildConversationFileDiagnosisContext } from "@/lib/server/file-retrieval";
-import { generateGeminiTextWithClient, type GeminiNativeClientConfig } from "@/lib/server/gemini-native";
+import {
+  generateGeminiResultWithClient,
+  generateGeminiTextWithClient,
+  type GeminiGroundingMetadata,
+  type GeminiNativeClientConfig,
+} from "@/lib/server/gemini-native";
 import { buildConversationMediaContext, type OpenAIContentPart } from "@/lib/server/media-parts";
+import { generateResponsesWebSearch } from "@/lib/server/openai-web-search";
 import { buildRetrievalOrchestratorResult } from "@/lib/server/retrieval-orchestrator";
 import {
   buildModelDiagnosisPrompt,
@@ -18,7 +24,7 @@ import {
   assertAppUserSession,
 } from "@/lib/server/app-session";
 import { ensureConversationRecord } from "@/lib/server/chat-state-store";
-import type { QuestionDiagnosis } from "@/lib/types";
+import type { QuestionDiagnosis, RetrievalSourceHit } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -32,11 +38,13 @@ const RAW_MEDIA_INSPECTION_PATTERNS = [
 const PROVIDER_CONFIG = {
   newapi: {
     apiKey: process.env.NEWAPI_KEY?.trim() || "",
+    baseUrl: buildProviderBaseUrl(process.env.NEWAPI_BASE_URL || ""),
     apiUrl: buildApiUrl(process.env.NEWAPI_BASE_URL || ""),
     displayName: "Gemini 网关",
   },
   yunwu: {
     apiKey: process.env.YUNWU_API_KEY?.trim() || "",
+    baseUrl: buildProviderBaseUrl(process.env.YUNWU_BASE_URL || "https://yunwu.ai/v1"),
     apiUrl: buildApiUrl(process.env.YUNWU_BASE_URL || "https://yunwu.ai/v1"),
     displayName: "Yunwu 网关",
   },
@@ -50,6 +58,14 @@ function resolveProviderConfig(modelOption: ReturnType<typeof getChatModelOption
   return {
     ...provider,
     apiKey,
+  };
+}
+
+function getOfficialGeminiConfig(): GeminiNativeClientConfig {
+  return {
+    baseUrl: process.env.GEMINI_BASE_URL?.trim() || "https://generativelanguage.googleapis.com",
+    apiKey: process.env.GEMINI_API_KEY?.trim() || "",
+    authMode: "google_header",
   };
 }
 
@@ -181,6 +197,10 @@ function isGeminiModel(modelOption: ReturnType<typeof getChatModelOption>): bool
   return modelOption.apiModel.startsWith("gemini-");
 }
 
+function isGptModel(modelOption: ReturnType<typeof getChatModelOption>): boolean {
+  return modelOption.apiModel.startsWith("gpt-");
+}
+
 function buildGeminiClient(
   modelOption: ReturnType<typeof getChatModelOption>,
   provider: ReturnType<typeof resolveProviderConfig>
@@ -213,6 +233,56 @@ function buildOpenAITextPart(text: string): OpenAIContentPart {
     type: "text",
     text,
   };
+}
+
+function buildSourceId(prefix: string, value: string, index: number) {
+  return `${prefix}-${index + 1}-${value}`.slice(0, 160);
+}
+
+function getSiteName(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function mergeSourceHits(...groups: RetrievalSourceHit[][]): RetrievalSourceHit[] {
+  const merged = new Map<string, RetrievalSourceHit>();
+
+  groups.flat().forEach((hit, index) => {
+    const key = hit.url?.trim() || `${hit.type}:${hit.id}:${index}`;
+    if (!merged.has(key)) {
+      merged.set(key, hit);
+    }
+  });
+
+  return Array.from(merged.values());
+}
+
+function buildGeminiGroundingSourceHits(metadata?: GeminiGroundingMetadata): RetrievalSourceHit[] {
+  if (!metadata?.groundingChunks?.length) return [];
+
+  const uniqueByUrl = new Map<string, RetrievalSourceHit>();
+
+  metadata.groundingChunks.forEach((chunk, index) => {
+    const url = chunk.web?.uri?.trim() || "";
+    if (!url || uniqueByUrl.has(url)) return;
+
+    const title = chunk.web?.title?.trim() || getSiteName(url) || `网页来源 ${index + 1}`;
+    const siteName = getSiteName(url);
+    uniqueByUrl.set(url, {
+      id: buildSourceId("web", url, index),
+      type: "web",
+      title,
+      category: "网页",
+      detail: siteName ? `来源站点：${siteName}` : "Google Search grounding",
+      siteName: siteName || undefined,
+      url,
+    });
+  });
+
+  return Array.from(uniqueByUrl.values());
 }
 
 function shouldInspectRawMedia(message: string): boolean {
@@ -278,7 +348,7 @@ export async function POST(req: NextRequest) {
       return appSessionErrorResponse(error, req);
     }
 
-    const { message, role, history, conversationId, modelId, answerMode, knowledgeMode } = await req.json();
+    const { message, role, history, conversationId, modelId, answerMode, knowledgeMode, webSearchEnabled } = await req.json();
 
     if (!message || typeof message !== "string") {
       return createJsonResponse({ error: "Missing message" }, 400);
@@ -300,6 +370,7 @@ export async function POST(req: NextRequest) {
       typeof knowledgeMode === "string" && isKnowledgeMode(knowledgeMode)
         ? knowledgeMode
         : DEFAULT_KNOWLEDGE_MODE;
+    const resolvedWebSearchEnabled = webSearchEnabled === true;
     const modelOption = getChatModelOption(resolvedModelId);
     const provider = resolveProviderConfig(modelOption);
     const recentHistory = normalizeHistory(history);
@@ -351,15 +422,6 @@ export async function POST(req: NextRequest) {
       clarificationReply = diagnosisResult.clarificationReply || undefined;
     }
 
-    if (!provider.apiUrl || !provider.apiKey) {
-      return createSseEventResponse(
-        [
-          ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
-          { content: `${provider.displayName} 还没有配置完整，请检查 .env 里的对应网关地址和 API Key。` },
-        ]
-      );
-    }
-
     if (clarificationReply) {
       return createSseEventResponse(
         [
@@ -390,6 +452,108 @@ export async function POST(req: NextRequest) {
     const kbHits = retrieval.kbHits;
     const sourceHits = retrieval.sourceHits;
     const geminiClient = buildGeminiClient(modelOption, provider);
+    const answerContext = buildGeminiAnswerContext({
+      selectedScopeContext,
+      knowledgeContext,
+      fileContext,
+      recentHistory,
+      message,
+    });
+
+    if (resolvedWebSearchEnabled) {
+      if (isGeminiModel(modelOption)) {
+        const geminiSearchClient = getOfficialGeminiConfig();
+
+        if (!geminiSearchClient.apiKey) {
+          return createSseEventResponse(
+            [
+              ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+              { content: "已打开联网搜索，但还没有配置 `GEMINI_API_KEY`，请先在 .env 中补上官方 Gemini Key。" },
+            ]
+          );
+        }
+
+        try {
+          const groundedResult = await generateGeminiResultWithClient({
+            client: geminiSearchClient,
+            model: modelOption.apiModel,
+            systemInstruction: systemPrompt,
+            parts: [{ text: answerContext }, ...mediaContext.geminiParts],
+            temperature: 0.3,
+            tools: [{ google_search: {} }],
+          });
+          const mergedSourceHits = mergeSourceHits(sourceHits, buildGeminiGroundingSourceHits(groundedResult.groundingMetadata));
+
+          return createSseEventResponse(
+            [
+              ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+              ...(kbHits.length > 0 ? [{ kbHits }] : []),
+              ...(mergedSourceHits.length > 0 ? [{ sourceHits: mergedSourceHits }] : []),
+              { content: groundedResult.text },
+            ]
+          );
+        } catch (error) {
+          console.error("Gemini web search error:", error);
+          return createSseEventResponse(
+            [
+              ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+              { content: error instanceof Error ? `Gemini 联网搜索失败：${error.message}` : "Gemini 联网搜索失败，请稍后重试。" },
+            ]
+          );
+        }
+      }
+
+      if (isGptModel(modelOption) && !mediaContext.hasMedia) {
+        if (!provider.baseUrl || !provider.apiKey) {
+          return createSseEventResponse(
+            [
+              ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+              { content: "已打开联网搜索，但 `YUNWU_BASE_URL` 或 `YUNWU_API_KEY` 还没有配置完整，请先检查 .env。" },
+            ]
+          );
+        }
+
+        try {
+          const webResult = await generateResponsesWebSearch({
+            client: {
+              baseUrl: provider.baseUrl,
+              apiKey: provider.apiKey,
+              toolType: "web_search_preview",
+            },
+            model: modelOption.apiModel,
+            instructions: systemPrompt,
+            input: answerContext,
+          });
+          const mergedSourceHits = mergeSourceHits(sourceHits, webResult.hits);
+
+          return createSseEventResponse(
+            [
+              ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+              ...(kbHits.length > 0 ? [{ kbHits }] : []),
+              ...(mergedSourceHits.length > 0 ? [{ sourceHits: mergedSourceHits }] : []),
+              { content: webResult.text },
+            ]
+          );
+        } catch (error) {
+          console.error("Yunwu GPT web search error:", error);
+          return createSseEventResponse(
+            [
+              ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+              { content: error instanceof Error ? `GPT 联网搜索失败：${error.message}` : "GPT 联网搜索失败，请稍后重试。" },
+            ]
+          );
+        }
+      }
+    }
+
+    if (!provider.apiUrl || !provider.apiKey) {
+      return createSseEventResponse(
+        [
+          ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+          { content: `${provider.displayName} 还没有配置完整，请检查 .env 里的对应网关地址和 API Key。` },
+        ]
+      );
+    }
 
     if (geminiClient && mediaContext.hasMedia) {
       try {
@@ -399,13 +563,7 @@ export async function POST(req: NextRequest) {
           systemInstruction: systemPrompt,
           parts: [
             {
-              text: buildGeminiAnswerContext({
-                selectedScopeContext,
-                knowledgeContext,
-                fileContext,
-                recentHistory,
-                message,
-              }),
+              text: answerContext,
             },
             ...mediaContext.geminiParts,
           ],

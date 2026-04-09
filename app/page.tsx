@@ -61,6 +61,7 @@ export default function Home() {
   const [roleName, setRoleName] = useState<string>("选择岗位");
   const [selectedModelId, setSelectedModelId] = useState<ChatModelId>(DEFAULT_CHAT_MODEL_ID);
   const [selectedAnswerMode, setSelectedAnswerMode] = useState<AnswerMode>(DEFAULT_ANSWER_MODE);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(DEFAULT_THEME_MODE);
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -142,6 +143,7 @@ export default function Home() {
           if (settings.answerMode && isAnswerMode(settings.answerMode)) {
             setSelectedAnswerMode(settings.answerMode);
           }
+          setWebSearchEnabled(settings.webSearchEnabled === true);
           if (settings.themeMode && isThemeMode(settings.themeMode)) {
             setThemeMode(settings.themeMode);
           }
@@ -151,6 +153,7 @@ export default function Home() {
           setRoleName("选择岗位");
           setSelectedModelId(DEFAULT_CHAT_MODEL_ID);
           setSelectedAnswerMode(DEFAULT_ANSWER_MODE);
+          setWebSearchEnabled(false);
           setThemeMode(DEFAULT_THEME_MODE);
           setShowRoleModal(true);
         }
@@ -196,6 +199,7 @@ export default function Home() {
               chatModelId: selectedModelId,
               answerMode: selectedAnswerMode,
               knowledgeMode: DEFAULT_KNOWLEDGE_MODE,
+              webSearchEnabled,
               themeMode,
             }
           : null,
@@ -214,6 +218,7 @@ export default function Home() {
     selectedModelId,
     stateReady,
     themeMode,
+    webSearchEnabled,
   ]);
 
   const activeConvo = conversations.find((c) => c.id === activeId) || null;
@@ -488,6 +493,7 @@ export default function Home() {
           modelId: selectedModelId,
           answerMode: selectedAnswerMode,
           knowledgeMode: DEFAULT_KNOWLEDGE_MODE,
+          webSearchEnabled,
         }),
       });
 
@@ -567,7 +573,7 @@ export default function Home() {
     } finally {
       setIsStreaming(false);
     }
-  }, [ensureConversationContext, isStreaming, role, selectedModelId, selectedAnswerMode]);
+  }, [ensureConversationContext, isStreaming, role, selectedModelId, selectedAnswerMode, webSearchEnabled]);
 
   const handleGenerateReport = useCallback(async () => {
     if (!activeConvo || isGeneratingReport || isStreaming) return;
@@ -682,6 +688,8 @@ export default function Home() {
             onModelChange={setSelectedModelId}
             selectedAnswerMode={selectedAnswerMode}
             onAnswerModeChange={setSelectedAnswerMode}
+            webSearchEnabled={webSearchEnabled}
+            onWebSearchToggle={setWebSearchEnabled}
             themeMode={themeMode}
             onThemeToggle={() => setThemeMode((prev) => (prev === "dark" ? "light" : "dark"))}
             roleName={roleName}

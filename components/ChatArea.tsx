@@ -25,6 +25,8 @@ interface ChatAreaProps {
   onModelChange: (modelId: ChatModelId) => void;
   selectedAnswerMode: AnswerMode;
   onAnswerModeChange: (mode: AnswerMode) => void;
+  webSearchEnabled: boolean;
+  onWebSearchToggle: (enabled: boolean) => void;
   themeMode: ThemeMode;
   onThemeToggle: () => void;
   roleName: string;
@@ -49,6 +51,8 @@ export default function ChatArea({
   onModelChange,
   selectedAnswerMode,
   onAnswerModeChange,
+  webSearchEnabled,
+  onWebSearchToggle,
   themeMode,
   onThemeToggle,
   roleName,
@@ -193,6 +197,8 @@ export default function ChatArea({
         onModelChange={onModelChange}
         selectedAnswerMode={selectedAnswerMode}
         onAnswerModeChange={onAnswerModeChange}
+        webSearchEnabled={webSearchEnabled}
+        onWebSearchToggle={onWebSearchToggle}
         disabled={isStreaming}
         isUploading={isUploading}
         uploadStatus={uploadStatus}

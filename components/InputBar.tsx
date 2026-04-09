@@ -16,6 +16,8 @@ interface InputBarProps {
   onModelChange: (modelId: ChatModelId) => void;
   selectedAnswerMode: AnswerMode;
   onAnswerModeChange: (mode: AnswerMode) => void;
+  webSearchEnabled: boolean;
+  onWebSearchToggle: (enabled: boolean) => void;
   disabled?: boolean;
   isUploading?: boolean;
   uploadStatus?: string | null;
@@ -31,6 +33,8 @@ export default function InputBar({
   onModelChange,
   selectedAnswerMode,
   onAnswerModeChange,
+  webSearchEnabled,
+  onWebSearchToggle,
   disabled = false,
   isUploading = false,
   uploadStatus,
@@ -136,6 +140,21 @@ export default function InputBar({
               <path d="M2.5 3.5L5 6.5L7.5 3.5" />
             </svg>
           </div>
+          <button
+            type="button"
+            onClick={() => onWebSearchToggle(!webSearchEnabled)}
+            disabled={disabled}
+            className="command-select px-4 text-[13px] cursor-pointer transition-colors"
+            style={{
+              background: webSearchEnabled ? "rgba(214, 161, 99, 0.16)" : undefined,
+              borderColor: webSearchEnabled ? "var(--surface-outline-accent)" : undefined,
+              color: webSearchEnabled ? "var(--color-amber-deep)" : undefined,
+              opacity: disabled ? 0.6 : 1,
+            }}
+            title="切换联网搜索"
+          >
+            联网搜索 {webSearchEnabled ? "开" : "关"}
+          </button>
         </div>
 
         <div

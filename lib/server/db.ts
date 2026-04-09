@@ -13,6 +13,10 @@ function getDatabaseUrl() {
   return value;
 }
 
+export function isDatabaseConfigured() {
+  return Boolean(process.env.DATABASE_URL?.trim());
+}
+
 function getDbPool() {
   if (!globalThis.__kbChatDbPool) {
     globalThis.__kbChatDbPool = new Pool({
@@ -50,9 +54,32 @@ async function runSchemaSetup(client: PoolClient) {
       answer_mode TEXT,
       knowledge_mode TEXT,
       theme_mode TEXT,
+      web_search_enabled BOOLEAN NOT NULL DEFAULT FALSE,
       active_conversation_id TEXT,
       updated_at_ms BIGINT NOT NULL
     )
+  `);
+
+  await client.query(`
+    ALTER TABLE kb_chat_user_state
+    ADD COLUMN IF NOT EXISTS web_search_enabled BOOLEAN NOT NULL DEFAULT FALSE
+  `);
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS kb_chat_report_cache (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      report_json JSONB NOT NULL,
+      created_at_ms BIGINT NOT NULL,
+      updated_at_ms BIGINT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, fingerprint)
+    )
+  `);
+
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS kb_chat_report_cache_user_updated_idx
+    ON kb_chat_report_cache (user_id, updated_at_ms DESC)
   `);
 }
 
