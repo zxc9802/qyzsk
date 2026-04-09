@@ -63,6 +63,7 @@ export const CHAT_MODELS: ChatModelOption[] = [
 ];
 
 export const DEFAULT_CHAT_MODEL_ID: ChatModelId = "gemini-3.1-pro-preview";
+export const DEFAULT_WIKI_DRAFT_MODEL_ID: ChatModelId = "yunwu-gemini-3-flash-preview";
 
 export function isChatModelId(value: string): value is ChatModelId {
   return CHAT_MODELS.some((model) => model.id === value);

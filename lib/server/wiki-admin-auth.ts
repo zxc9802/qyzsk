@@ -1,24 +1,42 @@
-import { headers } from "next/headers";
+import {
+  AppSessionUnauthorizedError,
+  appSessionErrorResponse,
+  assertAppUserSession,
+} from "@/lib/server/app-session";
 
-const ADMIN_TOKEN_HEADER = "x-admin-token";
+export class WikiAdminAccessError extends Error {
+  status: number;
 
-export async function assertWikiAdminAccess() {
-  const expectedToken = process.env.WIKI_ADMIN_TOKEN?.trim();
-  if (!expectedToken) {
-    throw new Error("WIKI_ADMIN_TOKEN 未配置，暂时不能访问 Wiki 管理接口。");
-  }
-
-  const headerStore = await headers();
-  const providedToken = headerStore.get(ADMIN_TOKEN_HEADER)?.trim();
-
-  if (!providedToken || providedToken !== expectedToken) {
-    throw new Error("Wiki 管理权限校验失败。");
+  constructor(message = "当前账号不是管理员，无法访问知识管理后台。", status = 403) {
+    super(message);
+    this.name = "WikiAdminAccessError";
+    this.status = status;
   }
 }
 
-export function wikiAdminAuthErrorResponse(message: string, status = 401) {
-  return new Response(JSON.stringify({ error: message }), {
-    status,
+export async function assertWikiAdminAccess(request: Pick<Request, "url" | "headers">) {
+  const session = await assertAppUserSession(request);
+  if (session.user?.role === "admin") {
+    return session;
+  }
+
+  throw new WikiAdminAccessError();
+}
+
+export function wikiAdminAuthErrorResponse(error: unknown, request: Pick<Request, "url">) {
+  if (error instanceof AppSessionUnauthorizedError) {
+    return appSessionErrorResponse(error, request);
+  }
+
+  if (error instanceof WikiAdminAccessError) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: error.status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  return new Response(JSON.stringify({ error: "Wiki 管理权限校验失败。" }), {
+    status: 403,
     headers: { "Content-Type": "application/json" },
   });
 }

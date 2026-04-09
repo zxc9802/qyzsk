@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
 import {
   getWikiStats,
@@ -8,11 +9,11 @@ import {
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    await assertWikiAdminAccess();
+    await assertWikiAdminAccess(req);
   } catch (error) {
-    return wikiAdminAuthErrorResponse(error instanceof Error ? error.message : "Wiki 管理权限校验失败。");
+    return wikiAdminAuthErrorResponse(error, req);
   }
 
   try {
@@ -30,7 +31,6 @@ export async function GET() {
         sources,
         pages: pages
           .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-          .slice(0, 80)
           .map((page) => ({
             id: page.id,
             title: page.title,

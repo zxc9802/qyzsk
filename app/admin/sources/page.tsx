@@ -8,37 +8,38 @@ import {
   AdminPageHeader,
   AdminSearchInput,
   AdminStatsGrid,
-  CATEGORY_OPTIONS,
   formatDate,
-  splitText,
   useDeferredSearchValue,
   useWikiAdminOverview,
 } from "@/components/admin/WikiAdminShared";
 import { useAppViewer } from "@/lib/client/app-session";
-import { getWikiCategoryLabel } from "@/lib/wiki-category-labels";
-import type { WikiPage } from "@/lib/wiki-types";
+import type { WikiSourceRecord, WikiSourceStatus } from "@/lib/wiki-types";
 
-type PageEditorState = {
+type SourceEditorState = {
   title: string;
-  summary: string;
-  rolesText: string;
-  sourceIdsText: string;
-  relatedPagesText: string;
   content: string;
+  status: WikiSourceStatus;
 };
 
-function buildPageEditorState(page: WikiPage): PageEditorState {
+function buildSourceEditorState(source: WikiSourceRecord): SourceEditorState {
   return {
-    title: page.title,
-    summary: page.summary,
-    rolesText: page.roles.join("、"),
-    sourceIdsText: page.sourceIds.join(", "),
-    relatedPagesText: page.relatedPages.join("\n"),
-    content: page.content,
+    title: source.title,
+    content: source.content,
+    status: source.status,
   };
 }
 
-export default function AdminPublishedPage() {
+function formatSourceStatusLabel(status: WikiSourceStatus) {
+  if (status === "approved") return "已通过";
+  if (status === "rejected") return "已驳回";
+  return "待处理";
+}
+
+function formatSubmitterLabel(source: WikiSourceRecord) {
+  return source.submittedBy?.nickname || source.submittedBy?.account || source.submittedBy?.userId || "未记录";
+}
+
+export default function AdminSourcesPage() {
   const router = useRouter();
   const { loading: sessionLoading, isAdmin } = useAppViewer();
   const {
@@ -46,17 +47,17 @@ export default function AdminPublishedPage() {
     error,
     stats,
     draftCount,
-    publishedPages,
+    sources,
     loadOverview,
   } = useWikiAdminOverview();
   const [searchQuery, setSearchQuery] = useState("");
-  const [pageEditors, setPageEditors] = useState<Record<string, PageEditorState>>({});
-  const [savingPageId, setSavingPageId] = useState<string | null>(null);
-  const [pageError, setPageError] = useState<string | null>(null);
-  const [targetPageId] = useState(() =>
+  const [sourceEditors, setSourceEditors] = useState<Record<string, SourceEditorState>>({});
+  const [savingSourceId, setSavingSourceId] = useState<string | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const [targetSourceId] = useState(() =>
     typeof window === "undefined"
       ? ""
-      : new URLSearchParams(window.location.search).get("pageId")?.trim() || ""
+      : new URLSearchParams(window.location.search).get("sourceId")?.trim() || ""
   );
   const deferredSearchQuery = useDeferredSearchValue(searchQuery);
 
@@ -67,118 +68,111 @@ export default function AdminPublishedPage() {
   }, [isAdmin, router, sessionLoading]);
 
   useEffect(() => {
-    setPageEditors((previous) => {
+    setSourceEditors((previous) => {
       const nextEditors = { ...previous };
 
-      publishedPages.forEach((page) => {
-        if (!nextEditors[page.id]) {
-          nextEditors[page.id] = buildPageEditorState(page);
+      sources.forEach((source) => {
+        if (!nextEditors[source.id]) {
+          nextEditors[source.id] = buildSourceEditorState(source);
         }
       });
 
       return nextEditors;
     });
-  }, [publishedPages]);
+  }, [sources]);
 
-  const filteredPages = useMemo(() => {
-    const sortedPages = [...publishedPages].sort((a, b) => {
-      if (targetPageId) {
-        if (a.id === targetPageId) return -1;
-        if (b.id === targetPageId) return 1;
+  const filteredSources = useMemo(() => {
+    const sortedSources = [...sources].sort((a, b) => {
+      if (targetSourceId) {
+        if (a.id === targetSourceId) return -1;
+        if (b.id === targetSourceId) return 1;
       }
 
       return b.updatedAt.localeCompare(a.updatedAt);
     });
 
     if (!deferredSearchQuery) {
-      return sortedPages;
+      return sortedSources;
     }
 
-    return sortedPages.filter((page) =>
+    return sortedSources.filter((source) =>
       [
-        page.id,
-        page.title,
-        page.summary,
-        page.content,
-        page.roles.join(" "),
-        page.sourceIds.join(" "),
-        page.relatedPages.join(" "),
+        source.id,
+        source.title,
+        source.content,
+        source.status,
+        source.submittedBy?.nickname,
+        source.submittedBy?.account,
       ]
         .join("\n")
         .toLowerCase()
         .includes(deferredSearchQuery)
     );
-  }, [deferredSearchQuery, publishedPages, targetPageId]);
+  }, [deferredSearchQuery, sources, targetSourceId]);
 
-  const groupedPages = useMemo(
+  const groupedSources = useMemo(
     () =>
-      CATEGORY_OPTIONS.map((category) => ({
-        category,
-        pages: filteredPages.filter((page) => page.category === category),
-      })).filter((group) => group.pages.length > 0),
-    [filteredPages]
+      (["drafted", "approved", "rejected"] as const).map((status) => ({
+        status,
+        sources: filteredSources.filter((source) => source.status === status),
+      })).filter((group) => group.sources.length > 0),
+    [filteredSources]
   );
 
   useEffect(() => {
-    if (!targetPageId) return;
+    if (!targetSourceId) return;
     const timeoutId = window.setTimeout(() => {
-      document.getElementById(`page-${CSS.escape(targetPageId)}`)?.scrollIntoView({
+      document.getElementById(`source-${targetSourceId}`)?.scrollIntoView({
         behavior: "smooth",
         block: "center",
       });
     }, 120);
 
     return () => window.clearTimeout(timeoutId);
-  }, [groupedPages, targetPageId]);
+  }, [groupedSources, targetSourceId]);
 
-  function updatePageEditor(pageId: string, patch: Partial<PageEditorState>) {
-    setPageEditors((previous) => ({
+  function updateSourceEditor(sourceId: string, patch: Partial<SourceEditorState>) {
+    setSourceEditors((previous) => ({
       ...previous,
-      [pageId]: {
-        ...(previous[pageId] || {
+      [sourceId]: {
+        ...(previous[sourceId] || {
           title: "",
-          summary: "",
-          rolesText: "",
-          sourceIdsText: "",
-          relatedPagesText: "",
           content: "",
+          status: "drafted" as WikiSourceStatus,
         }),
         ...patch,
       },
     }));
   }
 
-  async function savePage(pageId: string) {
-    const editor = pageEditors[pageId];
+  async function saveSource(sourceId: string) {
+    const editor = sourceEditors[sourceId];
     if (!editor) return;
 
-    setSavingPageId(pageId);
-    setPageError(null);
+    setSavingSourceId(sourceId);
+    setSourceError(null);
 
     try {
-      const response = await fetch(`/api/wiki/pages/${pageId}`, {
+      const response = await fetch(`/api/wiki/sources/${sourceId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: editor.title,
-          summary: editor.summary,
-          roles: splitText(editor.rolesText, /[、,，/]/u),
-          sourceIds: splitText(editor.sourceIdsText, /[,\s，/]+/u),
-          relatedPages: splitText(editor.relatedPagesText, /[\n,，]+/u),
           content: editor.content,
+          status: editor.status,
         }),
       });
 
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
       if (!response.ok) {
-        throw new Error(payload?.error || "保存 Wiki 页面失败。");
+        throw new Error(payload?.error || "保存 KB 资料失败。");
       }
 
       await loadOverview();
     } catch (requestError) {
-      setPageError(requestError instanceof Error ? requestError.message : "保存 Wiki 页面失败。");
+      setSourceError(requestError instanceof Error ? requestError.message : "保存 KB 资料失败。");
     } finally {
-      setSavingPageId(null);
+      setSavingSourceId(null);
     }
   }
 
@@ -198,8 +192,8 @@ export default function AdminPublishedPage() {
     <div className="h-screen overflow-y-auto px-4 py-5 md:px-8 md:py-8">
       <div className="mx-auto max-w-7xl space-y-6">
         <AdminPageHeader
-          title="Wiki 页面库"
-          description="这里按正式 Wiki 分类组织，适合按页面维度搜索、定位和直接修改已发布内容。页面 ID 保持稳定，方便长期引用。"
+          title="KB 资料库"
+          description="这里存放候选知识的原始资料，适合回溯知识来源、修正原文内容和手动调整资料状态。"
           backHref="/admin"
           backLabel="返回审核台"
           extra={
@@ -216,7 +210,7 @@ export default function AdminPublishedPage() {
                 查看待审核草稿
               </Link>
               <Link
-                href="/admin/sources"
+                href="/admin/published"
                 className="rounded-full border px-4 py-2.5 text-sm"
                 style={{
                   borderColor: "var(--surface-outline-strong)",
@@ -224,7 +218,7 @@ export default function AdminPublishedPage() {
                   color: "var(--color-sidebar-text-bright)",
                 }}
               >
-                查看 KB 资料库
+                查看 Wiki 页面库
               </Link>
             </div>
           }
@@ -237,85 +231,86 @@ export default function AdminPublishedPage() {
           lastPublishedAt={stats?.lastPublishedAt}
         />
 
-        <AdminErrorBanner error={error || pageError} />
+        <AdminErrorBanner error={error || sourceError} />
 
         <section className="panel-surface rounded-[24px] px-5 py-5">
           <div className="text-[11px] uppercase tracking-[0.24em]" style={{ color: "var(--color-amber-soft)" }}>
-            Wiki Search
+            KB Search
           </div>
           <h3 className="mt-2 text-lg font-semibold" style={{ color: "var(--color-sidebar-text-bright)" }}>
-            搜索正式 Wiki 页面
+            搜索 KB 原始资料
           </h3>
           <p className="mt-3 text-sm leading-7" style={{ color: "var(--color-ink-soft)" }}>
-            支持按页面标题、页面 ID、摘要、正文、关联岗位和来源进行搜索。搜索后会按分类重新组织结果。
+            可以按资料标题、资料 ID、正文内容、提交人和审核状态来检索 KB。
           </p>
           <div className="mt-4">
             <AdminSearchInput
               value={searchQuery}
               onChange={setSearchQuery}
-              placeholder="搜索标题、页面 ID、岗位、来源"
+              placeholder="搜索 KB 标题、资料 ID、提交人"
             />
           </div>
         </section>
 
-        {groupedPages.length === 0 ? (
+        {groupedSources.length === 0 ? (
           <div className="soft-panel rounded-[24px] px-5 py-6 text-sm" style={{ color: "var(--color-ink-soft)" }}>
-            {publishedPages.length === 0 ? "当前还没有已发布页面。" : "没有命中当前搜索条件的 Wiki 页面。"}
+            {sources.length === 0 ? "当前还没有 KB 原始资料。" : "没有命中当前搜索条件的 KB 资料。"}
           </div>
         ) : (
           <div className="space-y-6">
-            {groupedPages.map((group) => (
-              <section key={group.category} className="space-y-4">
+            {groupedSources.map((group) => (
+              <section key={group.status} className="space-y-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.24em]" style={{ color: "var(--color-amber-soft)" }}>
-                      {group.category}
+                      {group.status}
                     </div>
                     <h2 className="mt-2 text-2xl font-semibold" style={{ color: "var(--color-sidebar-text-bright)" }}>
-                      {getWikiCategoryLabel(group.category)}
+                      {formatSourceStatusLabel(group.status)}
                     </h2>
                   </div>
                   <div
                     className="rounded-full px-3 py-1 text-[11px]"
                     style={{ background: "var(--chip-soft)", color: "var(--color-amber-deep)" }}
                   >
-                    {group.pages.length} 页
+                    {group.sources.length} 条
                   </div>
                 </div>
 
                 <div className="grid gap-4">
-                  {group.pages.map((page) => {
-                    const editor = pageEditors[page.id] || buildPageEditorState(page);
-                    const isTargetPage = page.id === targetPageId;
+                  {group.sources.map((source) => {
+                    const editor = sourceEditors[source.id] || buildSourceEditorState(source);
+                    const isTargetSource = source.id === targetSourceId;
 
                     return (
                       <article
-                        id={`page-${page.id}`}
-                        key={page.id}
+                        id={`source-${source.id}`}
+                        key={source.id}
                         className="panel-surface rounded-[24px] px-5 py-5"
-                        style={isTargetPage ? { outline: "1px solid rgba(214, 161, 99, 0.55)" } : undefined}
+                        style={isTargetSource ? { outline: "1px solid rgba(214, 161, 99, 0.55)" } : undefined}
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="text-[11px]" style={{ color: "var(--color-ink-muted)" }}>
-                              {page.id}
+                              {source.id}
                             </div>
-                            <div className="mt-2 text-sm" style={{ color: "var(--color-ink-muted)" }}>
-                              更新时间：{formatDate(page.updatedAt)} · 版本：v{page.version}
+                            <div className="mt-2 space-y-1 text-sm" style={{ color: "var(--color-ink-muted)" }}>
+                              <div>更新时间：{formatDate(source.updatedAt)} · 草稿关联：{source.draftIds.length} 条</div>
+                              <div>提交人：{formatSubmitterLabel(source)}</div>
                             </div>
                           </div>
                           <div
                             className="rounded-full px-3 py-1 text-[10px] uppercase tracking-[0.14em]"
                             style={{ background: "var(--chip-soft)", color: "var(--color-amber-deep)" }}
                           >
-                            {getWikiCategoryLabel(page.category)}
+                            {formatSourceStatusLabel(source.status)}
                           </div>
                         </div>
 
                         <div className="mt-4 grid gap-3">
                           <input
                             value={editor.title}
-                            onChange={(event) => updatePageEditor(page.id, { title: event.target.value })}
+                            onChange={(event) => updateSourceEditor(source.id, { title: event.target.value })}
                             className="rounded-[16px] border px-4 py-3 text-sm outline-none"
                             style={{
                               borderColor: "var(--surface-outline-strong)",
@@ -323,56 +318,24 @@ export default function AdminPublishedPage() {
                               color: "var(--color-sidebar-text-bright)",
                             }}
                           />
-                          <textarea
-                            value={editor.summary}
-                            onChange={(event) => updatePageEditor(page.id, { summary: event.target.value })}
-                            rows={2}
-                            className="rounded-[18px] border px-4 py-3 text-sm leading-7 outline-none"
+                          <select
+                            value={editor.status}
+                            onChange={(event) => updateSourceEditor(source.id, { status: event.target.value as WikiSourceStatus })}
+                            className="rounded-[16px] border px-4 py-3 text-sm outline-none"
                             style={{
                               borderColor: "var(--surface-outline-strong)",
                               background: "var(--surface-command)",
                               color: "var(--color-sidebar-text-bright)",
                             }}
-                          />
-                          <div className="grid gap-3 md:grid-cols-3">
-                            <input
-                              value={editor.rolesText}
-                              onChange={(event) => updatePageEditor(page.id, { rolesText: event.target.value })}
-                              placeholder="关联岗位"
-                              className="rounded-[16px] border px-4 py-3 text-sm outline-none"
-                              style={{
-                                borderColor: "var(--surface-outline-strong)",
-                                background: "var(--surface-command)",
-                                color: "var(--color-sidebar-text-bright)",
-                              }}
-                            />
-                            <input
-                              value={editor.sourceIdsText}
-                              onChange={(event) => updatePageEditor(page.id, { sourceIdsText: event.target.value })}
-                              placeholder="来源 ID"
-                              className="rounded-[16px] border px-4 py-3 text-sm outline-none"
-                              style={{
-                                borderColor: "var(--surface-outline-strong)",
-                                background: "var(--surface-command)",
-                                color: "var(--color-sidebar-text-bright)",
-                              }}
-                            />
-                            <input
-                              value={editor.relatedPagesText}
-                              onChange={(event) => updatePageEditor(page.id, { relatedPagesText: event.target.value })}
-                              placeholder="关联页面，一行一个或逗号分隔"
-                              className="rounded-[16px] border px-4 py-3 text-sm outline-none"
-                              style={{
-                                borderColor: "var(--surface-outline-strong)",
-                                background: "var(--surface-command)",
-                                color: "var(--color-sidebar-text-bright)",
-                              }}
-                            />
-                          </div>
+                          >
+                            <option value="drafted">待处理</option>
+                            <option value="approved">已通过</option>
+                            <option value="rejected">已驳回</option>
+                          </select>
                           <textarea
                             value={editor.content}
-                            onChange={(event) => updatePageEditor(page.id, { content: event.target.value })}
-                            rows={14}
+                            onChange={(event) => updateSourceEditor(source.id, { content: event.target.value })}
+                            rows={12}
                             className="rounded-[22px] border px-4 py-4 text-sm leading-7 outline-none"
                             style={{
                               borderColor: "var(--surface-outline-strong)",
@@ -384,16 +347,16 @@ export default function AdminPublishedPage() {
 
                         <div className="mt-4 flex justify-end">
                           <button
-                            onClick={() => void savePage(page.id)}
-                            disabled={savingPageId === page.id || loading}
+                            onClick={() => void saveSource(source.id)}
+                            disabled={savingSourceId === source.id || loading}
                             className="rounded-full px-4 py-2 text-sm font-medium disabled:cursor-default"
                             style={{
                               background: "var(--brand-badge)",
                               color: "var(--brand-badge-text)",
-                              opacity: savingPageId === page.id || loading ? 0.6 : 1,
+                              opacity: savingSourceId === source.id || loading ? 0.6 : 1,
                             }}
                           >
-                            {savingPageId === page.id ? "保存中..." : "保存 Wiki 页面"}
+                            {savingSourceId === source.id ? "保存中..." : "保存 KB 资料"}
                           </button>
                         </div>
                       </article>

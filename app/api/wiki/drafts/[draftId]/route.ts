@@ -9,9 +9,9 @@ export async function PATCH(
   context: { params: Promise<{ draftId: string }> }
 ) {
   try {
-    await assertWikiAdminAccess();
+    await assertWikiAdminAccess(req);
   } catch (error) {
-    return wikiAdminAuthErrorResponse(error instanceof Error ? error.message : "Wiki 管理权限校验失败。");
+    return wikiAdminAuthErrorResponse(error, req);
   }
 
   try {

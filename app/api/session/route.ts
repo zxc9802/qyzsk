@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import {
   appSessionErrorResponse,
   assertAppSession,
+  buildLocalDevPublicSessionData,
   buildPublicSessionData,
   isMainAppSsoRequired,
   readAppSession,
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
         success: true,
         data: {
           requiresSso: false,
-          session: session ? buildPublicSessionData(session) : null,
+          session: session ? buildPublicSessionData(session) : buildLocalDevPublicSessionData(),
         },
       },
       200

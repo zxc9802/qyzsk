@@ -1,4 +1,4 @@
-import { DEFAULT_CHAT_MODEL_ID } from "@/lib/chat-models";
+import { DEFAULT_WIKI_DRAFT_MODEL_ID } from "@/lib/chat-models";
 import { generateModelText } from "@/lib/server/model-text";
 import type { WikiCategory, WikiDraft, WikiSubmitter } from "@/lib/wiki-types";
 import {
@@ -17,6 +17,31 @@ type DraftModelPayload = {
   relatedPages?: string[];
   content?: string;
 };
+
+const DEFAULT_WIKI_DRAFT_TIMEOUT_MS = 12000;
+
+function getWikiDraftTimeoutMs() {
+  const rawValue = Number(process.env.WIKI_DRAFT_TIMEOUT_MS || DEFAULT_WIKI_DRAFT_TIMEOUT_MS);
+  if (!Number.isFinite(rawValue)) return DEFAULT_WIKI_DRAFT_TIMEOUT_MS;
+  return Math.max(3000, Math.floor(rawValue));
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
 
 function heuristicCategory(title: string, content: string): WikiCategory {
   const combined = `${title}\n${content}`.toLowerCase();
@@ -76,7 +101,7 @@ async function generateDraftPayload(options: {
 }): Promise<DraftModelPayload> {
   const publishedPages = await listPublishedPages();
   const pageSummary = publishedPages
-    .slice(0, 24)
+    .slice(0, 12)
     .map((page) => `- ${page.id}｜${page.title}｜${page.summary}`)
     .join("\n");
 
@@ -98,7 +123,7 @@ async function generateDraftPayload(options: {
     `资料标题：${options.sourceTitle}`,
     "",
     "资料内容：",
-    trimForModel(options.sourceContent, 12000),
+    trimForModel(options.sourceContent, 6000),
     "",
     "请严格输出这个 JSON：",
     `{
@@ -113,13 +138,17 @@ async function generateDraftPayload(options: {
   ].join("\n");
 
   try {
-    const raw = await generateModelText({
-      modelId: options.modelId || DEFAULT_CHAT_MODEL_ID,
-      systemPrompt: "你只输出合法 JSON，不要输出 Markdown 解释。",
-      userPrompt: prompt,
-      temperature: 0.1,
-      maxTokens: 2200,
-    });
+    const raw = await withTimeout(
+      generateModelText({
+        modelId: options.modelId || DEFAULT_WIKI_DRAFT_MODEL_ID,
+        systemPrompt: "你只输出合法 JSON，不要输出 Markdown 解释。",
+        userPrompt: prompt,
+        temperature: 0.1,
+        maxTokens: 1200,
+      }),
+      getWikiDraftTimeoutMs(),
+      "Wiki 草稿生成超时"
+    );
 
     return parseDraftPayload(raw) || buildFallbackDraft(options.sourceTitle, options.sourceContent);
   } catch (error) {

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CHAT_MODELS, DEFAULT_CHAT_MODEL_ID, type ChatModelId } from "@/lib/chat-models";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { CHAT_MODELS, DEFAULT_WIKI_DRAFT_MODEL_ID, type ChatModelId } from "@/lib/chat-models";
 import { extractApiErrorMessage, readJsonSafely, redirectToMainAppIfNeeded } from "@/lib/client/api-response";
 import type { WikiCategory, WikiDraft, WikiPage, WikiSourceRecord, WikiStats } from "@/lib/wiki-types";
 
@@ -23,7 +23,6 @@ export type DraftEditorState = {
   notes: string;
 };
 
-export const ADMIN_TOKEN_STORAGE_KEY = "kb-chat-wiki-admin-token";
 export const CATEGORY_OPTIONS: WikiCategory[] = ["concepts", "entities", "roles", "faq", "synthesis"];
 
 export function formatDate(value?: string | null) {
@@ -61,26 +60,18 @@ export function splitText(value: string, separators: RegExp) {
 }
 
 export function useWikiAdminOverview() {
-  const [adminToken, setAdminToken] = useState("");
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ingestTitle, setIngestTitle] = useState("");
   const [ingestContent, setIngestContent] = useState("");
-  const [ingestModelId, setIngestModelId] = useState<ChatModelId>(DEFAULT_CHAT_MODEL_ID);
+  const [ingestModelId, setIngestModelId] = useState<ChatModelId>(DEFAULT_WIKI_DRAFT_MODEL_ID);
   const [submittingIngest, setSubmittingIngest] = useState(false);
   const [draftEditors, setDraftEditors] = useState<Record<string, DraftEditorState>>({});
   const [savingDraftId, setSavingDraftId] = useState<string | null>(null);
   const [bulkApproving, setBulkApproving] = useState(false);
   const [linting, setLinting] = useState(false);
   const [lintResult, setLintResult] = useState<string | null>(null);
-
-  useEffect(() => {
-    const storedToken = window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "";
-    if (storedToken) {
-      setAdminToken(storedToken);
-    }
-  }, []);
 
   const draftCount = overview?.drafts.filter((draft) => draft.status === "draft").length || 0;
 
@@ -90,7 +81,6 @@ export function useWikiAdminOverview() {
         ...init,
         headers: {
           "Content-Type": "application/json",
-          "x-admin-token": adminToken,
           ...(init?.headers || {}),
         },
       });
@@ -106,15 +96,10 @@ export function useWikiAdminOverview() {
 
       return payload as T;
     },
-    [adminToken]
+    []
   );
 
   const loadOverview = useCallback(async () => {
-    if (!adminToken.trim()) {
-      setError("请先填写管理员 token。");
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
@@ -132,26 +117,16 @@ export function useWikiAdminOverview() {
     } finally {
       setLoading(false);
     }
-  }, [adminToken, apiRequest]);
+  }, [apiRequest]);
 
   useEffect(() => {
-    if (!adminToken.trim()) return;
     void loadOverview();
-  }, [adminToken, loadOverview]);
+  }, [loadOverview]);
 
   const activeDrafts = useMemo(
     () => overview?.drafts.filter((draft) => draft.status === "draft") || [],
     [overview]
   );
-
-  function persistToken(nextToken: string) {
-    setAdminToken(nextToken);
-    if (nextToken.trim()) {
-      window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, nextToken.trim());
-    } else {
-      window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
-    }
-  }
 
   function updateDraftEditor(draftId: string, patch: Partial<DraftEditorState>) {
     setDraftEditors((prev) => ({
@@ -301,8 +276,6 @@ export function useWikiAdminOverview() {
   }
 
   return {
-    adminToken,
-    persistToken,
     overview,
     loading,
     error,
@@ -333,51 +306,6 @@ export function useWikiAdminOverview() {
   };
 }
 
-export function AdminTokenPanel(props: {
-  adminToken: string;
-  onChange: (value: string) => void;
-  onRefresh: () => void | Promise<void>;
-  loading: boolean;
-}) {
-  return (
-    <section className="panel-surface rounded-[28px] px-5 py-5 md:px-7">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.24em]" style={{ color: "var(--color-amber-soft)" }}>
-            Admin Auth
-          </div>
-          <label className="mt-3 block text-sm" style={{ color: "var(--color-ink-soft)" }}>
-            在 `.env` 中配置 `WIKI_ADMIN_TOKEN` 后，把 token 填在这里。token 只保存在当前浏览器会话里。
-          </label>
-          <input
-            value={props.adminToken}
-            onChange={(event) => props.onChange(event.target.value)}
-            placeholder="输入管理员 token"
-            className="mt-3 w-full rounded-[18px] border px-4 py-3 text-sm outline-none"
-            style={{
-              borderColor: "var(--surface-outline-strong)",
-              background: "var(--surface-command)",
-              color: "var(--color-sidebar-text-bright)",
-            }}
-          />
-        </div>
-        <button
-          onClick={() => void props.onRefresh()}
-          disabled={props.loading || !props.adminToken.trim()}
-          className="rounded-full px-4 py-2.5 text-sm font-medium disabled:cursor-default"
-          style={{
-            background: "var(--brand-badge)",
-            color: "var(--brand-badge-text)",
-            opacity: props.loading || !props.adminToken.trim() ? 0.6 : 1,
-          }}
-        >
-          {props.loading ? "加载中..." : "刷新管理数据"}
-        </button>
-      </div>
-    </section>
-  );
-}
-
 export function AdminErrorBanner({ error }: { error?: string | null }) {
   if (!error) return null;
 
@@ -402,7 +330,7 @@ export function AdminStatsGrid(props: {
       {[
         ["已发布页面", String(props.publishedPages || 0)],
         ["待审核草稿", String(props.draftCount || 0)],
-        ["原始资料", String(props.rawSourceCount || 0)],
+        ["KB 原始资料", String(props.rawSourceCount || 0)],
         ["最近发布时间", props.lastPublishedAt ? formatDate(props.lastPublishedAt) : "—"],
       ].map(([label, value]) => (
         <div key={label} className="soft-panel rounded-[24px] px-5 py-5">
@@ -416,6 +344,30 @@ export function AdminStatsGrid(props: {
       ))}
     </section>
   );
+}
+
+export function AdminSearchInput(props: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <input
+      value={props.value}
+      onChange={(event) => props.onChange(event.target.value)}
+      placeholder={props.placeholder}
+      className="w-full rounded-[18px] border px-4 py-3 text-sm outline-none"
+      style={{
+        borderColor: "var(--surface-outline-strong)",
+        background: "var(--surface-command)",
+        color: "var(--color-sidebar-text-bright)",
+      }}
+    />
+  );
+}
+
+export function useDeferredSearchValue(value: string) {
+  return useDeferredValue(value.trim().toLowerCase());
 }
 
 export function AdminPageHeader(props: {

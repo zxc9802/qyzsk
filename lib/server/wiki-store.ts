@@ -376,6 +376,38 @@ export async function readPublishedPage(pageId: string): Promise<WikiPageSearchD
   }
 }
 
+export async function updatePublishedPage(
+  pageId: string,
+  updater: (current: WikiPageSearchDocument) => WikiPage
+): Promise<WikiPageSearchDocument> {
+  const current = await readPublishedPage(pageId);
+  if (!current) {
+    throw new Error("Wiki 页面不存在。");
+  }
+
+  const next = updater({
+    ...current,
+    updatedAt: nowIso(),
+  });
+
+  const normalizedPage: WikiPage = {
+    ...next,
+    id: current.id,
+    createdAt: current.createdAt,
+    updatedAt: nowIso(),
+    version: Math.max(current.version + 1, next.version || current.version + 1),
+  };
+
+  await writePublishedPage(normalizedPage);
+  const refreshed = await readPublishedPage(current.id);
+
+  if (!refreshed) {
+    throw new Error("Wiki 页面更新后无法重新读取。");
+  }
+
+  return refreshed;
+}
+
 export async function writePublishedPage(page: WikiPage) {
   await ensureWikiWorkspace();
   const filePath = publishedFilePath(page.id);

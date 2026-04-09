@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { DEFAULT_CHAT_MODEL_ID } from "@/lib/chat-models";
+import { DEFAULT_WIKI_DRAFT_MODEL_ID } from "@/lib/chat-models";
 import { extractApiErrorMessage, readJsonSafely, redirectToMainAppIfNeeded } from "@/lib/client/api-response";
 import type { AppViewer } from "@/lib/client/app-session";
 import type { WikiDraft } from "@/lib/wiki-types";
@@ -117,7 +117,7 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
         body: JSON.stringify({
           title: ingestTitle.trim(),
           content: ingestContent.trim(),
-          modelId: DEFAULT_CHAT_MODEL_ID,
+          modelId: DEFAULT_WIKI_DRAFT_MODEL_ID,
         }),
       });
       const payload = await readJsonSafely<{ error?: string; message?: string; redirectUrl?: string }>(response);
@@ -200,7 +200,7 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
                     opacity: submittingIngest ? 0.6 : 1,
                   }}
                 >
-                  {submittingIngest ? "正在提交..." : "提交候选知识"}
+                  {submittingIngest ? "正在生成候选草稿..." : "提交候选知识"}
                 </button>
               </div>
             </div>

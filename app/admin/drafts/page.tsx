@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AdminErrorBanner,
   AdminPageHeader,
+  AdminSearchInput,
   AdminStatsGrid,
-  AdminTokenPanel,
   CATEGORY_OPTIONS,
   buildDraftEditorState,
   formatDate,
+  useDeferredSearchValue,
   useWikiAdminOverview,
 } from "@/components/admin/WikiAdminShared";
 import { useAppViewer } from "@/lib/client/app-session";
@@ -32,11 +33,7 @@ export default function AdminDraftsPage() {
   const router = useRouter();
   const { loading: sessionLoading, isAdmin } = useAppViewer();
   const {
-    adminToken,
-    persistToken,
-    loading,
     error,
-    loadOverview,
     stats,
     draftCount,
     activeDrafts,
@@ -47,17 +44,63 @@ export default function AdminDraftsPage() {
     bulkApproving,
     approveAllDrafts,
   } = useWikiAdminOverview();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [targetDraftId] = useState(() =>
+    typeof window === "undefined"
+      ? ""
+      : new URLSearchParams(window.location.search).get("draftId")?.trim() || ""
+  );
+  const deferredSearchQuery = useDeferredSearchValue(searchQuery);
 
   const sortedDrafts = useMemo(
-    () => [...activeDrafts].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
-    [activeDrafts]
+    () =>
+      [...activeDrafts].sort((a, b) => {
+        if (targetDraftId) {
+          if (a.id === targetDraftId) return -1;
+          if (b.id === targetDraftId) return 1;
+        }
+        return a.updatedAt < b.updatedAt ? 1 : -1;
+      }),
+    [activeDrafts, targetDraftId]
   );
+
+  const filteredDrafts = useMemo(() => {
+    if (!deferredSearchQuery) return sortedDrafts;
+    return sortedDrafts.filter((draft) =>
+      [
+        draft.id,
+        draft.title,
+        draft.summary,
+        draft.content,
+        draft.sourceId,
+        draft.notes,
+        draft.submittedBy?.nickname,
+        draft.submittedBy?.account,
+      ]
+        .filter(Boolean)
+        .join("\n")
+        .toLowerCase()
+        .includes(deferredSearchQuery)
+    );
+  }, [deferredSearchQuery, sortedDrafts]);
 
   useEffect(() => {
     if (!sessionLoading && !isAdmin) {
       router.replace("/admin");
     }
   }, [isAdmin, router, sessionLoading]);
+
+  useEffect(() => {
+    if (!targetDraftId) return;
+    const timeoutId = window.setTimeout(() => {
+      document.getElementById(`draft-${targetDraftId}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 120);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [targetDraftId, filteredDrafts.length]);
 
   if (sessionLoading || !isAdmin) {
     return (
@@ -94,13 +137,6 @@ export default function AdminDraftsPage() {
           }
         />
 
-        <AdminTokenPanel
-          adminToken={adminToken}
-          onChange={persistToken}
-          onRefresh={loadOverview}
-          loading={loading}
-        />
-
         <AdminStatsGrid
           publishedPages={stats?.publishedPages || 0}
           draftCount={draftCount}
@@ -135,17 +171,42 @@ export default function AdminDraftsPage() {
           ) : null}
         </section>
 
-        {sortedDrafts.length === 0 ? (
+        <section className="panel-surface rounded-[24px] px-5 py-5">
+          <div className="text-[11px] uppercase tracking-[0.24em]" style={{ color: "var(--color-amber-soft)" }}>
+            Draft Search
+          </div>
+          <h3 className="mt-2 text-lg font-semibold" style={{ color: "var(--color-sidebar-text-bright)" }}>
+            搜索待审核候选知识
+          </h3>
+          <p className="mt-3 text-sm leading-7" style={{ color: "var(--color-ink-soft)" }}>
+            可以按标题、来源 ID、提交人、草稿内容来筛选，快速定位到某条待审核知识。
+          </p>
+          <div className="mt-4">
+            <AdminSearchInput
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder="搜索候选知识标题、来源 ID、提交人"
+            />
+          </div>
+        </section>
+
+        {filteredDrafts.length === 0 ? (
           <div className="soft-panel rounded-[24px] px-5 py-6 text-sm" style={{ color: "var(--color-ink-soft)" }}>
-            目前没有待审核的 Wiki 草稿。
+            {sortedDrafts.length === 0 ? "目前没有待审核的 Wiki 草稿。" : "没有命中当前搜索条件的候选知识。"}
           </div>
         ) : (
           <div className="space-y-4">
-            {sortedDrafts.map((draft) => {
+            {filteredDrafts.map((draft) => {
               const editor = draftEditors[draft.id] || buildDraftEditorState(draft);
+              const isTargetDraft = draft.id === targetDraftId;
 
               return (
-                <article key={draft.id} className="panel-surface rounded-[28px] px-5 py-5 md:px-6">
+                <article
+                  id={`draft-${draft.id}`}
+                  key={draft.id}
+                  className="panel-surface rounded-[28px] px-5 py-5 md:px-6"
+                  style={isTargetDraft ? { outline: "1px solid rgba(214, 161, 99, 0.55)" } : undefined}
+                >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <div className="text-[11px] uppercase tracking-[0.24em]" style={{ color: "var(--color-amber-soft)" }}>

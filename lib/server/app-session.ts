@@ -388,6 +388,19 @@ export function buildPublicSessionData(session: AppSession) {
   };
 }
 
+export function buildLocalDevPublicSessionData() {
+  return {
+    user: {
+      id: "kb-chat-local-dev-user",
+      account: "local-admin@localhost",
+      nickname: "本地调试管理员",
+      role: "admin",
+    },
+    mainAppUrl: getConfiguredMainAppUrl() || "http://localhost:3000",
+    expiresAt: new Date(Date.now() + getSessionTtlMs()).toISOString(),
+  };
+}
+
 export function getAppSessionUserId(session: AppSession | null) {
   const userId = typeof session?.user?.id === "string" ? session.user.id.trim() : "";
   return userId || null;

@@ -1,13 +1,14 @@
+import { NextRequest } from "next/server";
 import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
 import { listPublishedPages } from "@/lib/server/wiki-store";
 
 export const runtime = "nodejs";
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
-    await assertWikiAdminAccess();
+    await assertWikiAdminAccess(req);
   } catch (error) {
-    return wikiAdminAuthErrorResponse(error instanceof Error ? error.message : "Wiki 管理权限校验失败。");
+    return wikiAdminAuthErrorResponse(error, req);
   }
 
   try {
