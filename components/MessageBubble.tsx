@@ -101,7 +101,7 @@ function renderSourcePanel(hits: RetrievalSourceHit[]) {
       <div className="mb-3 flex items-center gap-2">
         <div className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--color-amber)" }} />
         <span className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--color-amber-soft)" }}>
-          Sources Used
+          起芽知识库
         </span>
       </div>
       <div className="flex flex-wrap gap-2.5">
@@ -256,6 +256,7 @@ export default function MessageBubble({ message, isStreaming = false }: MessageB
           >
             {displayContent || sourceHits.length > 0 || questionDiagnosis ? (
               <>
+                {renderSourcePanel(sourceHits)}
                 {questionDiagnosis ? renderQuestionDiagnosisPanel(questionDiagnosis) : null}
                 {displayContent ? (
                   renderStructuredResponse(displayContent, isStreaming)
@@ -276,7 +277,6 @@ export default function MessageBubble({ message, isStreaming = false }: MessageB
                     <span className="text-xs" style={{ color: "var(--color-ink-muted)" }}>思考中...</span>
                   </div>
                 ) : null}
-                {renderSourcePanel(sourceHits)}
               </>
             ) : isStreaming ? (
               <div className="flex items-center gap-2 py-1">
