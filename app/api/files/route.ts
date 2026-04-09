@@ -120,7 +120,6 @@ export async function POST(req: NextRequest) {
     const kind = inferUploadKind(file.name, mimeType);
     if (!kind) continue;
 
-    const buffer = Buffer.from(await file.arrayBuffer());
     const pendingRecord = await createPendingFileRecord({
       userId,
       conversationId,
@@ -128,7 +127,8 @@ export async function POST(req: NextRequest) {
       mimeType,
       size: file.size,
       kind,
-      buffer,
+      stream: typeof file.stream === "function" ? file.stream() : undefined,
+      buffer: typeof file.stream === "function" ? undefined : Buffer.from(await file.arrayBuffer()),
     });
     pendingFileIds.push(pendingRecord.id);
   }

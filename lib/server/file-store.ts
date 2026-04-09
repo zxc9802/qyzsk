@@ -1,4 +1,7 @@
-import { promises as fs } from "fs";
+import { createWriteStream, promises as fs } from "fs";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
+import type { ReadableStream as NodeReadableStream } from "stream/web";
 import path from "path";
 
 export const STORAGE_ROOT = path.join(process.cwd(), ".kb-chat-data");
@@ -152,7 +155,8 @@ export async function createPendingFileRecord(options: {
   mimeType: string;
   size: number;
   kind: FileKind;
-  buffer: Buffer;
+  buffer?: Buffer;
+  stream?: ReadableStream<Uint8Array>;
 }): Promise<ConversationFileRecord> {
   await ensureStorageRoot();
 
@@ -163,7 +167,16 @@ export async function createPendingFileRecord(options: {
   const now = Date.now();
 
   await ensureDir(dir);
-  await fs.writeFile(storagePath, options.buffer);
+  if (options.stream) {
+    await pipeline(
+      Readable.fromWeb(options.stream as unknown as NodeReadableStream<Uint8Array>),
+      createWriteStream(storagePath)
+    );
+  } else if (options.buffer) {
+    await fs.writeFile(storagePath, options.buffer);
+  } else {
+    throw new Error("Missing file contents");
+  }
 
   const record: ConversationFileRecord = {
     id,

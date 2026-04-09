@@ -18,6 +18,8 @@ import { generateGeminiText, geminiConfigured } from "@/lib/server/newapi-gemini
 
 const execFileAsync = promisify(execFile);
 const nodeRequire = createRequire(import.meta.url);
+const IMAGE_ANALYSIS_MAX_DIMENSION = 1280;
+const VIDEO_FRAME_SCALE_WIDTH = 960;
 const PDF_PARSE_SCRIPT = String.raw`
 const fs = require("fs");
 const { PDFParse } = require("pdf-parse");
@@ -175,12 +177,16 @@ async function processDocument(record: ConversationFileRecord): Promise<Processe
 }
 
 async function processImage(record: ConversationFileRecord): Promise<ProcessedUploadResult> {
-  const original = await fs.readFile(record.storagePath);
-  const rotated = sharp(original).rotate();
+  const rotated = sharp(record.storagePath).rotate();
   const metadata = await rotated.metadata();
   const resized = await rotated
-    .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 82 })
+    .resize({
+      width: IMAGE_ANALYSIS_MAX_DIMENSION,
+      height: IMAGE_ANALYSIS_MAX_DIMENSION,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: 78 })
     .toBuffer();
 
   const analysis = geminiConfigured()
@@ -448,7 +454,7 @@ async function extractVideoFrames(filePath: string, durationSec: number) {
   await fs.rm(framesDir, { recursive: true, force: true });
   await fs.mkdir(framesDir, { recursive: true });
 
-  const frameTarget = durationSec > 120 ? 6 : durationSec > 45 ? 5 : 4;
+  const frameTarget = durationSec > 150 ? 4 : 3;
   const intervalSec = Math.max(1, Math.round(durationSec > 0 ? durationSec / frameTarget : 8));
   const outputPattern = path.join(framesDir, "frame-%03d.jpg");
 
@@ -457,9 +463,11 @@ async function extractVideoFrames(filePath: string, durationSec: number) {
     "-i",
     filePath,
     "-vf",
-    `fps=1/${intervalSec},scale=1024:-2:force_original_aspect_ratio=decrease`,
+    `fps=1/${intervalSec},scale=${VIDEO_FRAME_SCALE_WIDTH}:-2:force_original_aspect_ratio=decrease`,
     "-frames:v",
     String(frameTarget),
+    "-q:v",
+    "6",
     outputPattern,
   ], {
     maxBuffer: 16 * 1024 * 1024,

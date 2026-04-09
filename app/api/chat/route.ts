@@ -23,6 +23,12 @@ import type { QuestionDiagnosis } from "@/lib/types";
 export const runtime = "nodejs";
 
 const RECENT_HISTORY_LIMIT = 8;
+const RAW_MEDIA_INSPECTION_PATTERNS = [
+  /\bocr\b/i,
+  /(?:重新|直接|再)?(?:看|读|分析|识别)(?:一下)?(?:原图|图片|图里|图上|画面|视频|视频画面|截图|海报)/,
+  /(?:图片|图里|图上|画面|截图|海报|视频里|视频画面|镜头里|关键帧|逐帧).*(?:写了什么|是什么|有没有|能不能看清|细节|文字|字幕)/,
+  /(?:逐帧|关键帧|读图|识图|提取文字|识别文字|识别字幕|提取字幕)/,
+];
 const PROVIDER_CONFIG = {
   newapi: {
     apiKey: process.env.NEWAPI_KEY?.trim() || "",
@@ -209,6 +215,13 @@ function buildOpenAITextPart(text: string): OpenAIContentPart {
   };
 }
 
+function shouldInspectRawMedia(message: string): boolean {
+  const normalized = message.trim();
+  if (!normalized) return false;
+
+  return RAW_MEDIA_INSPECTION_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
 function buildGeminiAnswerContext(options: {
   selectedScopeContext: string;
   knowledgeContext: string;
@@ -291,7 +304,7 @@ export async function POST(req: NextRequest) {
     const provider = resolveProviderConfig(modelOption);
     const recentHistory = normalizeHistory(history);
     const mediaContext =
-      typeof conversationId === "string" && conversationId
+      typeof conversationId === "string" && conversationId && shouldInspectRawMedia(message)
         ? await buildConversationMediaContext(userId, conversationId)
         : { hasMedia: false, geminiParts: [], openAIParts: [] };
     let diagnosis: QuestionDiagnosis | undefined;
