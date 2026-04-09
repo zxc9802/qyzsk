@@ -5,7 +5,7 @@ export type GeminiPart =
 export interface GeminiNativeClientConfig {
   baseUrl: string;
   apiKey: string;
-  authMode: "query" | "bearer";
+  authMode: "query" | "bearer" | "google_header";
 }
 
 interface GenerateGeminiTextOptions {
@@ -14,6 +14,11 @@ interface GenerateGeminiTextOptions {
   systemInstruction?: string;
   parts: GeminiPart[];
   temperature?: number;
+  tools?: GeminiTool[];
+}
+
+export interface GeminiTool {
+  google_search?: Record<string, never>;
 }
 
 interface GeminiCandidate {
@@ -22,6 +27,7 @@ interface GeminiCandidate {
       text?: string;
     }>;
   };
+  groundingMetadata?: GeminiGroundingMetadata;
 }
 
 interface GeminiResponse {
@@ -29,6 +35,21 @@ interface GeminiResponse {
   error?: {
     message?: string;
   };
+}
+
+export interface GeminiGroundingMetadata {
+  webSearchQueries?: string[];
+  groundingChunks?: Array<{
+    web?: {
+      uri?: string;
+      title?: string;
+    };
+  }>;
+}
+
+export interface GeminiGeneratedResult {
+  text: string;
+  groundingMetadata?: GeminiGroundingMetadata;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -53,6 +74,7 @@ function buildHeaders(client: GeminiNativeClientConfig): HeadersInit {
   return {
     "Content-Type": "application/json",
     ...(client.authMode === "bearer" ? { Authorization: `Bearer ${client.apiKey}` } : {}),
+    ...(client.authMode === "google_header" ? { "x-goog-api-key": client.apiKey } : {}),
   };
 }
 
@@ -60,13 +82,14 @@ export function geminiClientConfigured(client: GeminiNativeClientConfig): boolea
   return Boolean(client.baseUrl.trim() && client.apiKey.trim());
 }
 
-export async function generateGeminiTextWithClient({
+export async function generateGeminiResultWithClient({
   client,
   model,
   systemInstruction,
   parts,
   temperature = 0.2,
-}: GenerateGeminiTextOptions): Promise<string> {
+  tools,
+}: GenerateGeminiTextOptions): Promise<GeminiGeneratedResult> {
   if (!geminiClientConfigured(client)) {
     throw new Error("Gemini gateway is not configured.");
   }
@@ -86,6 +109,7 @@ export async function generateGeminiTextWithClient({
           parts,
         },
       ],
+      tools,
       generationConfig: {
         temperature,
       },
@@ -117,5 +141,13 @@ export async function generateGeminiTextWithClient({
     throw new Error("Gemini returned an empty response.");
   }
 
-  return text;
+  return {
+    text,
+    groundingMetadata: payload?.candidates?.[0]?.groundingMetadata,
+  };
+}
+
+export async function generateGeminiTextWithClient(options: GenerateGeminiTextOptions): Promise<string> {
+  const result = await generateGeminiResultWithClient(options);
+  return result.text;
 }

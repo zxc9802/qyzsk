@@ -486,6 +486,66 @@ body::after {
   font-weight: 600;
 }
 
+.ai-markdown a {
+  color: var(--color-amber-soft);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-amber) 55%, transparent);
+  text-underline-offset: 0.2rem;
+  transition: color 160ms ease, text-decoration-color 160ms ease;
+}
+
+.ai-markdown a:hover {
+  color: var(--color-sidebar-text-bright);
+  text-decoration-color: currentColor;
+}
+
+.inline-source-link {
+  color: var(--color-amber-soft);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-amber) 55%, transparent);
+  text-underline-offset: 0.2rem;
+}
+
+.inline-citation-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.26rem;
+  max-width: 11rem;
+  margin-left: 0.28rem;
+  padding: 0.12rem 0.42rem;
+  border-radius: 999px;
+  border: 1px solid var(--surface-outline);
+  background: color-mix(in srgb, var(--muted-surface) 94%, white 6%);
+  color: var(--color-ink-muted);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  text-decoration: none !important;
+  vertical-align: baseline;
+  transform: translateY(-0.02rem);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.inline-citation-badge:hover {
+  color: var(--color-sidebar-text-bright);
+  border-color: var(--surface-outline-accent);
+  background: color-mix(in srgb, var(--chip-soft) 72%, white 18%);
+}
+
+.inline-citation-icon {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  opacity: 0.7;
+}
+
+.inline-citation-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ai-markdown code {
   background: var(--code-surface);
   padding: 0.15rem 0.42rem;
@@ -536,6 +596,44 @@ body::after {
   color: var(--conclusion-text) !important;
   font-weight: 500;
   margin: 0;
+}
+
+.web-citation-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.82rem;
+}
+
+.web-citation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: min(100%, 11rem);
+  padding: 0.22rem 0.52rem;
+  border-radius: 999px;
+  border: 1px solid var(--surface-outline);
+  background: color-mix(in srgb, var(--muted-surface) 94%, white 6%);
+  color: var(--color-ink-muted);
+  font-size: 0.72rem;
+  line-height: 1;
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.web-citation-chip:hover {
+  color: var(--color-sidebar-text-bright);
+  border-color: var(--surface-outline-accent);
+  background: color-mix(in srgb, var(--chip-soft) 72%, white 18%);
+}
+
+.web-citation-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .report-page-break {

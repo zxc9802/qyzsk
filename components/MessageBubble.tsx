@@ -11,11 +11,97 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
 }
 
-function parseMarkdown(text: string): string {
-  let html = text
+function escapeHtmlText(text: string): string {
+  return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function escapeHtmlAttr(text: string): string {
+  return escapeHtmlText(text).replace(/"/g, "&quot;");
+}
+
+function normalizeCitationHost(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  try {
+    return new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`).hostname
+      .replace(/^www\./, "")
+      .toLowerCase();
+  } catch {
+    return trimmed
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .replace(/\/.*$/, "")
+      .toLowerCase();
+  }
+}
+
+function findMatchingWebHit(candidate: string, webHits: RetrievalSourceHit[]): RetrievalSourceHit | undefined {
+  const normalizedCandidate = normalizeCitationHost(candidate);
+  if (!normalizedCandidate) return undefined;
+
+  return webHits.find((hit) => {
+    const hitHost = normalizeCitationHost(hit.siteName || hit.url || "");
+    return Boolean(hitHost) && hitHost === normalizedCandidate;
+  });
+}
+
+function buildInlineCitationHtml(hit: RetrievalSourceHit, label?: string): string {
+  const displayLabel = (label?.trim() || hit.siteName || hit.title || "来源").trim();
+  const href = escapeHtmlAttr(hit.url || "#");
+  const title = escapeHtmlAttr(hit.title);
+
+  return `<a href="${href}" target="_blank" rel="noreferrer" class="inline-citation-badge" title="${title}"><span class="inline-citation-icon" aria-hidden="true">↗</span><span class="inline-citation-label">${escapeHtmlText(displayLabel)}</span></a>`;
+}
+
+function parseMarkdown(text: string, webHits: RetrievalSourceHit[] = [], usedWebHitIds?: Set<string>): string {
+  const placeholders: string[] = [];
+  const storePlaceholder = (value: string) => {
+    const token = `__HTML_PLACEHOLDER_${placeholders.length}__`;
+    placeholders.push(value);
+    return token;
+  };
+  const trackWebHit = (hit?: RetrievalSourceHit) => {
+    if (hit) {
+      usedWebHitIds?.add(hit.id);
+    }
+  };
+
+  let html = text
+    .replace(
+      /[（(]\s*\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)\s*[)）]/g,
+      (_, label: string, url: string) => {
+        const hit = findMatchingWebHit(url, webHits);
+        if (!hit) return storePlaceholder(
+          `<a href="${escapeHtmlAttr(url)}" target="_blank" rel="noreferrer" class="inline-source-link">${escapeHtmlText(label)}</a>`
+        );
+        trackWebHit(hit);
+        return storePlaceholder(buildInlineCitationHtml(hit, label));
+      }
+    )
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label: string, url: string) => {
+      const hit = findMatchingWebHit(url, webHits);
+      if (!hit) {
+        return storePlaceholder(
+          `<a href="${escapeHtmlAttr(url)}" target="_blank" rel="noreferrer" class="inline-source-link">${escapeHtmlText(label)}</a>`
+        );
+      }
+
+      trackWebHit(hit);
+      return storePlaceholder(buildInlineCitationHtml(hit, label));
+    })
+    .replace(/[（(]\s*([a-z0-9.-]+\.[a-z]{2,})\s*[)）]/gi, (match, host: string) => {
+      const hit = findMatchingWebHit(host, webHits);
+      if (!hit) return match;
+
+      trackWebHit(hit);
+      return storePlaceholder(buildInlineCitationHtml(hit, host));
+    });
+
+  html = escapeHtmlText(html);
 
   html = html.replace(/^---$/gm, "<hr />");
   html = html.replace(/^#{1,6}\s*(.+)$/gm, "<h3>$1</h3>");
@@ -44,11 +130,45 @@ function parseMarkdown(text: string): string {
   html = html.replace(/<p>\s*(<hr \/>)/g, "$1");
   html = html.replace(/(<hr \/>)\s*<\/p>/g, "$1");
 
+  placeholders.forEach((placeholder, index) => {
+    html = html.replaceAll(`__HTML_PLACEHOLDER_${index}__`, placeholder);
+  });
+
   return html;
 }
 
-function renderStructuredResponse(content: string, isStreaming: boolean) {
+function renderWebCitationChips(hits: RetrievalSourceHit[]) {
+  if (hits.length === 0) return null;
+
+  return (
+    <div className="web-citation-row">
+      {hits.map((hit) => {
+        const chipTitle = hit.siteName ? `${hit.title} · ${hit.siteName}` : hit.title;
+        const chipLabel = hit.siteName || hit.title;
+
+        return (
+          <a
+            key={`${hit.type}-${hit.id}-${hit.title}`}
+            href={hit.url}
+            target="_blank"
+            rel="noreferrer"
+            title={chipTitle}
+            className="web-citation-chip"
+          >
+            <span className="inline-citation-icon" aria-hidden="true">↗</span>
+            <span className="web-citation-chip-text">{chipLabel}</span>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderStructuredResponse(content: string, isStreaming: boolean, webHits: RetrievalSourceHit[]) {
   const conclusionMatch = content.match(/(?:^|\n)###?\s*(?:1[)）]?\s*)?先说结论\s*\n([\s\S]*?)(?=\n###?\s|$)/);
+  const usedWebHitIds = new Set<string>();
+
+  const buildUnusedWebHits = () => webHits.filter((hit) => !usedWebHitIds.has(hit.id));
 
   if (conclusionMatch) {
     const conclusionText = conclusionMatch[1].trim();
@@ -57,27 +177,32 @@ function renderStructuredResponse(content: string, isStreaming: boolean) {
     return (
       <div>
         <div className="conclusion-box">
-          <div className="ai-markdown" dangerouslySetInnerHTML={{ __html: parseMarkdown(conclusionText) }} />
+          <div className="ai-markdown" dangerouslySetInnerHTML={{ __html: parseMarkdown(conclusionText, webHits, usedWebHitIds) }} />
         </div>
         <div
           className={`ai-markdown ${isStreaming ? "streaming-cursor" : ""}`}
-          dangerouslySetInnerHTML={{ __html: parseMarkdown(rest) }}
+          dangerouslySetInnerHTML={{ __html: parseMarkdown(rest, webHits, usedWebHitIds) }}
         />
+        {renderWebCitationChips(buildUnusedWebHits())}
       </div>
     );
   }
 
   return (
-    <div
-      className={`ai-markdown ${isStreaming ? "streaming-cursor" : ""}`}
-      dangerouslySetInnerHTML={{ __html: parseMarkdown(content) }}
-    />
+    <div>
+      <div
+        className={`ai-markdown ${isStreaming ? "streaming-cursor" : ""}`}
+        dangerouslySetInnerHTML={{ __html: parseMarkdown(content, webHits, usedWebHitIds) }}
+      />
+      {renderWebCitationChips(buildUnusedWebHits())}
+    </div>
   );
 }
 
 function renderSourceTypeLabel(type: RetrievalSourceHit["type"]) {
   if (type === "wiki") return "Wiki";
   if (type === "file") return "资料";
+  if (type === "web") return "网页";
   return "KB";
 }
 
@@ -114,15 +239,32 @@ function renderSourcePanel(hits: RetrievalSourceHit[]) {
               borderColor: "var(--surface-outline)",
             }}
           >
-            <div className="text-[12px] font-medium" style={{ color: "var(--color-sidebar-text-bright)" }}>
-              {renderSourceTypeLabel(hit.type)} · {hit.title}
-            </div>
+            {hit.url ? (
+              <a
+                href={hit.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[12px] font-medium underline decoration-transparent transition-colors hover:decoration-current"
+                style={{ color: "var(--color-sidebar-text-bright)" }}
+              >
+                {renderSourceTypeLabel(hit.type)} · {hit.title}
+              </a>
+            ) : (
+              <div className="text-[12px] font-medium" style={{ color: "var(--color-sidebar-text-bright)" }}>
+                {renderSourceTypeLabel(hit.type)} · {hit.title}
+              </div>
+            )}
             <div className="mt-1 text-[10px] uppercase tracking-[0.18em]" style={{ color: "var(--color-ink-muted)" }}>
               {renderSourceCategoryLabel(hit)}
             </div>
             {hit.detail ? (
               <div className="mt-1 text-[11px] leading-5" style={{ color: "var(--color-ink-soft)" }}>
                 {hit.detail}
+              </div>
+            ) : null}
+            {hit.siteName || hit.publishedAt ? (
+              <div className="mt-1 text-[11px] leading-5" style={{ color: "var(--color-ink-muted)" }}>
+                {[hit.siteName, hit.publishedAt].filter(Boolean).join(" · ")}
               </div>
             ) : null}
           </div>
@@ -197,7 +339,7 @@ export default function MessageBubble({ message, isStreaming = false }: MessageB
     : null;
   const sourceLabel = questionDiagnosis?.mode === "clarify" ? "系统引导" : modelLabel;
   const kbHits = !isUser ? message.kbHits || [] : [];
-  const sourceHits = !isUser
+  const allSourceHits = !isUser
     ? message.sourceHits || kbHits.map<RetrievalSourceHit>((hit: KnowledgeBaseHit) => ({
         id: hit.id,
         type: "knowledge_base",
@@ -205,6 +347,8 @@ export default function MessageBubble({ message, isStreaming = false }: MessageB
         category: hit.category,
       }))
     : [];
+  const localSourceHits = allSourceHits.filter((hit) => hit.type !== "web");
+  const webSourceHits = allSourceHits.filter((hit) => hit.type === "web");
 
   if (isUser) {
     return (
@@ -254,12 +398,12 @@ export default function MessageBubble({ message, isStreaming = false }: MessageB
               boxShadow: "var(--card-shadow-strong)",
             }}
           >
-            {displayContent || sourceHits.length > 0 || questionDiagnosis ? (
+            {displayContent || localSourceHits.length > 0 || webSourceHits.length > 0 || questionDiagnosis ? (
               <>
-                {renderSourcePanel(sourceHits)}
+                {renderSourcePanel(localSourceHits)}
                 {questionDiagnosis ? renderQuestionDiagnosisPanel(questionDiagnosis) : null}
                 {displayContent ? (
-                  renderStructuredResponse(displayContent, isStreaming)
+                  renderStructuredResponse(displayContent, isStreaming, webSourceHits)
                 ) : isStreaming ? (
                   <div className="flex items-center gap-2 py-1">
                     <div className="flex gap-1">
@@ -276,7 +420,7 @@ export default function MessageBubble({ message, isStreaming = false }: MessageB
                     </div>
                     <span className="text-xs" style={{ color: "var(--color-ink-muted)" }}>思考中...</span>
                   </div>
-                ) : null}
+                ) : renderWebCitationChips(webSourceHits)}
               </>
             ) : isStreaming ? (
               <div className="flex items-center gap-2 py-1">
@@ -295,7 +439,10 @@ export default function MessageBubble({ message, isStreaming = false }: MessageB
                 <span className="text-xs" style={{ color: "var(--color-ink-muted)" }}>思考中...</span>
               </div>
             ) : (
-              renderSourcePanel(sourceHits)
+              <>
+                {renderSourcePanel(localSourceHits)}
+                {renderWebCitationChips(webSourceHits)}
+              </>
             )}
           </div>
         </div>
