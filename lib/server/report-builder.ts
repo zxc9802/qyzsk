@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { getChatModelOption } from "@/lib/chat-models";
 import {
   type ConversationReport,
@@ -10,14 +11,20 @@ import {
 } from "@/lib/report";
 import type { KnowledgeBaseHit, Message, QuestionDiagnosis } from "@/lib/types";
 import { listConversationFiles } from "@/lib/server/file-store";
+import {
+  getCachedConversationReport,
+  saveCachedConversationReport,
+} from "@/lib/server/report-cache";
 import { generateModelText } from "@/lib/server/model-text";
 
 const REPORT_MODEL_ID = "yunwu-gemini-3-flash-preview";
-const MAX_PROMPT_CHARS = 18000;
-const MAX_FILE_SUMMARY_CHARS = 420;
-const MAX_TIMELINE_ITEM_CHARS = 280;
-const MAX_ASSISTANT_HIGHLIGHTS = 6;
-const MAX_USER_REQUESTS = 5;
+const REPORT_PROMPT_VERSION = "2026-04-09-report-speed-v1";
+const MAX_PROMPT_CHARS = 10500;
+const MAX_FILE_SUMMARY_CHARS = 260;
+const MAX_TIMELINE_ITEM_CHARS = 180;
+const MAX_ASSISTANT_HIGHLIGHTS = 4;
+const MAX_USER_REQUESTS = 4;
+const MAX_RECENT_MESSAGES = 8;
 
 type ReportModelDraft = {
   reportTitle?: string;
@@ -100,6 +107,20 @@ export async function buildConversationReport(
       summary: trimTo(file.summary || file.excerpt || "暂无摘要。", MAX_FILE_SUMMARY_CHARS),
       references: [],
     }));
+  const fingerprint = createReportFingerprint({
+    input,
+    messages,
+    fileItems,
+  });
+  const cachedReport = await getCachedConversationReport({
+    userId,
+    conversationId: input.conversationId,
+    fingerprint,
+  });
+
+  if (cachedReport) {
+    return cachedReport;
+  }
 
   const prompt = buildReportPrompt({
     input,
@@ -117,7 +138,7 @@ export async function buildConversationReport(
       systemPrompt: buildReportSystemPrompt(),
       userPrompt: prompt,
       temperature: 0.15,
-      maxTokens: 2200,
+      maxTokens: 1500,
     });
     draft = parseReportDraft(raw);
   } catch (error) {
@@ -132,14 +153,28 @@ export async function buildConversationReport(
     fileItems,
   });
   const resolvedDraft = mergeDraftWithFallback(draft, fallback);
-
-  return buildFinalReport({
+  const report = buildFinalReport({
     input,
     messages,
     knowledgeHits,
     fileItems,
     draft: resolvedDraft,
   });
+
+  if (draft) {
+    try {
+      await saveCachedConversationReport({
+        userId,
+        conversationId: input.conversationId,
+        fingerprint,
+        report,
+      });
+    } catch (error) {
+      console.error("Report cache write failed:", error);
+    }
+  }
+
+  return report;
 }
 
 function buildReportSystemPrompt(): string {
@@ -153,7 +188,8 @@ function buildReportSystemPrompt(): string {
 3. 文案要像业务分析报告，不要像聊天回复。
 4. 对“判断依据来源”要优先引用我提供的知识库条目、上传资料和对话补充信息。
 5. 如果信息不足，要在“风险与不确定项”里明确写出来，不要伪造确定性。
-6. 资料摘要部分不要展开大段原文，只做摘要级描述。`;
+6. 资料摘要部分不要展开大段原文，只做摘要级描述。
+7. 每个字段尽量用短句表达，避免空话和重复铺陈。`;
 }
 
 function buildReportPrompt(options: {
@@ -211,11 +247,7 @@ function buildReportPrompt(options: {
       "title": "",
       "conclusion": "",
       "basis": "",
-      "sources": [
-        { "type": "knowledge_base", "label": "KB000｜示例", "detail": "为什么引用它" },
-        { "type": "file", "label": "示例文件.pdf", "detail": "引用了哪部分摘要" },
-        { "type": "conversation", "label": "用户补充信息", "detail": "从对话里得到的线索" }
-      ]
+      "sources": [{ "type": "knowledge_base", "label": "", "detail": "" }]
     }
   ],
   "analysisDimensions": [
@@ -245,7 +277,7 @@ function buildReportPrompt(options: {
     `回答模式：${options.input.answerMode === "deep" ? "深度回答" : "简单回答"}`,
     `首轮用户诉求：${firstUserMessage || "无"}`,
     `最近用户核心问题：${latestUserMessage || "无"}`,
-    `最近助手结论摘要：${trimTo(latestAssistantMessage || "无", 800)}`,
+    `最近助手结论摘要：${trimTo(latestAssistantMessage || "无", 320)}`,
     "",
     "【用户主要诉求变化】",
     userRequests,
@@ -262,7 +294,7 @@ function buildReportPrompt(options: {
     "【上传资料摘要】",
     fileSummary,
     "",
-    "【对话主体线索（按时间顺序精简）】",
+    "【最近关键对话】",
     conversationBody,
     "",
     "请基于以上信息生成结构化业务分析报告。",
@@ -322,6 +354,39 @@ function trimForModel(value: string, maxChars: number): string {
   const headBudget = Math.floor(maxChars * 0.45);
   const tailBudget = Math.floor(maxChars * 0.45);
   return `${value.slice(0, headBudget)}\n\n[中间部分已折叠，以保证报告生成稳定]\n\n${value.slice(-tailBudget)}`;
+}
+
+function createReportFingerprint(options: {
+  input: ReportGenerationRequest;
+  messages: Message[];
+  fileItems: ReportFileSummaryItem[];
+}): string {
+  const payload = {
+    version: REPORT_PROMPT_VERSION,
+    conversationId: options.input.conversationId,
+    conversationTitle: options.input.conversationTitle,
+    roleId: options.input.roleId,
+    roleName: options.input.roleName,
+    answerMode: options.input.answerMode,
+    messages: options.messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      timestamp: message.timestamp,
+      kbHits: message.kbHits || [],
+      sourceHits: message.sourceHits || [],
+      questionDiagnosis: message.questionDiagnosis || null,
+    })),
+    fileItems: options.fileItems.map((item) => ({
+      id: item.id,
+      name: item.name,
+      kind: item.kind,
+      active: item.active,
+      summary: item.summary,
+    })),
+  };
+
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
 function parseReportDraft(raw: string): ReportModelDraft | null {
@@ -540,7 +605,9 @@ function buildAssistantHighlights(messages: Message[]): string {
 }
 
 function buildConversationBodySummary(messages: Message[]): string {
-  const timeline = messages.map((message, index) => {
+  const recentMessages = messages.slice(-MAX_RECENT_MESSAGES);
+  const hiddenMessageCount = Math.max(0, messages.length - recentMessages.length);
+  const timeline = recentMessages.map((message, index) => {
     const prefix = message.role === "user" ? "用户" : "助手";
     const diagnosis =
       message.role === "assistant" && message.questionDiagnosis
@@ -557,7 +624,14 @@ function buildConversationBodySummary(messages: Message[]): string {
     return `${index + 1}. ${prefix}${diagnosis}${kb}：${trimTo(cleanText(message.content), MAX_TIMELINE_ITEM_CHARS)}`;
   });
 
-  return trimForModel(timeline.join("\n"), Math.max(6000, MAX_PROMPT_CHARS - 8000));
+  const sections = [
+    hiddenMessageCount > 0
+      ? `更早的 ${hiddenMessageCount} 条消息已压缩进“用户主要诉求变化”和“助手关键结论摘录”，这里仅保留最近上下文。`
+      : "",
+    ...timeline,
+  ].filter(Boolean);
+
+  return trimForModel(sections.join("\n"), Math.max(2200, MAX_PROMPT_CHARS - 6400));
 }
 
 function normalizeStringArray(candidate: string[] | undefined, fallback: string[]): string[] {

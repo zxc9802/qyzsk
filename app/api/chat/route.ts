@@ -13,6 +13,7 @@ import {
 import { buildConversationMediaContext, type OpenAIContentPart } from "@/lib/server/media-parts";
 import { generateResponsesWebSearch } from "@/lib/server/openai-web-search";
 import { buildRetrievalOrchestratorResult } from "@/lib/server/retrieval-orchestrator";
+import { buildWebSearchInstruction, buildWebSearchPolicyDecision } from "@/lib/server/web-search-policy";
 import {
   buildModelDiagnosisPrompt,
   diagnoseQuestion,
@@ -422,15 +423,6 @@ export async function POST(req: NextRequest) {
       clarificationReply = diagnosisResult.clarificationReply || undefined;
     }
 
-    if (clarificationReply) {
-      return createSseEventResponse(
-        [
-          ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
-          { content: clarificationReply },
-        ]
-      );
-    }
-
     const systemPrompt =
       resolvedAnswerMode === "deep"
         ? buildSystemPrompt(role || "new")
@@ -452,13 +444,37 @@ export async function POST(req: NextRequest) {
     const kbHits = retrieval.kbHits;
     const sourceHits = retrieval.sourceHits;
     const geminiClient = buildGeminiClient(modelOption, provider);
+    const canUseReliableWebSearch = isGptModel(modelOption) && !mediaContext.hasMedia && provider.apiKey !== "";
+    const webSearchPolicy = buildWebSearchPolicyDecision({
+      query: message,
+      diagnosis,
+      sourceHits,
+      webSearchEnabled: resolvedWebSearchEnabled,
+      canUseReliableWebSearch,
+    });
+    const effectiveKnowledgeContext = webSearchPolicy.shouldDownweightLocalKnowledge ? "" : knowledgeContext;
+    const effectiveKbHits = webSearchPolicy.shouldDownweightLocalKnowledge ? [] : kbHits;
+    const effectiveSourceHits = webSearchPolicy.shouldDownweightLocalKnowledge ? [] : sourceHits;
     const answerContext = buildGeminiAnswerContext({
       selectedScopeContext,
-      knowledgeContext,
+      knowledgeContext: effectiveKnowledgeContext,
       fileContext,
       recentHistory,
       message,
     });
+    const webSearchInstruction = buildWebSearchInstruction({
+      policy: webSearchPolicy,
+      clarificationReply,
+    });
+
+    if (clarificationReply && !webSearchPolicy.shouldBypassClarification) {
+      return createSseEventResponse(
+        [
+          ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+          { content: clarificationReply },
+        ]
+      );
+    }
 
     if (resolvedWebSearchEnabled) {
       if (isGeminiModel(modelOption)) {
@@ -504,44 +520,46 @@ export async function POST(req: NextRequest) {
       }
 
       if (isGptModel(modelOption) && !mediaContext.hasMedia) {
-        if (!provider.baseUrl || !provider.apiKey) {
+        if (webSearchPolicy.shouldAutoSearchWeb) {
+          if (!provider.baseUrl || !provider.apiKey) {
           return createSseEventResponse(
             [
               ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
               { content: "已打开联网搜索，但 `YUNWU_BASE_URL` 或 `YUNWU_API_KEY` 还没有配置完整，请先检查 .env。" },
             ]
           );
-        }
+          }
 
-        try {
-          const webResult = await generateResponsesWebSearch({
-            client: {
-              baseUrl: provider.baseUrl,
-              apiKey: provider.apiKey,
-              toolType: "web_search_preview",
-            },
-            model: modelOption.apiModel,
-            instructions: systemPrompt,
-            input: answerContext,
-          });
-          const mergedSourceHits = mergeSourceHits(sourceHits, webResult.hits);
+          try {
+            const webResult = await generateResponsesWebSearch({
+              client: {
+                baseUrl: provider.baseUrl,
+                apiKey: provider.apiKey,
+                toolType: "web_search_preview",
+              },
+              model: modelOption.apiModel,
+              instructions: `${systemPrompt}\n\n${webSearchInstruction}`,
+              input: answerContext,
+            });
+            const mergedSourceHits = mergeSourceHits(effectiveSourceHits, webResult.hits);
 
-          return createSseEventResponse(
-            [
-              ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
-              ...(kbHits.length > 0 ? [{ kbHits }] : []),
-              ...(mergedSourceHits.length > 0 ? [{ sourceHits: mergedSourceHits }] : []),
-              { content: webResult.text },
-            ]
-          );
-        } catch (error) {
-          console.error("Yunwu GPT web search error:", error);
-          return createSseEventResponse(
-            [
-              ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
-              { content: error instanceof Error ? `GPT 联网搜索失败：${error.message}` : "GPT 联网搜索失败，请稍后重试。" },
-            ]
-          );
+            return createSseEventResponse(
+              [
+                ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+                ...(effectiveKbHits.length > 0 ? [{ kbHits: effectiveKbHits }] : []),
+                ...(mergedSourceHits.length > 0 ? [{ sourceHits: mergedSourceHits }] : []),
+                { content: webResult.text },
+              ]
+            );
+          } catch (error) {
+            console.error("Yunwu GPT web search error:", error);
+            return createSseEventResponse(
+              [
+                ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+                { content: error instanceof Error ? `GPT 联网搜索失败：${error.message}` : "GPT 联网搜索失败，请稍后重试。" },
+              ]
+            );
+          }
         }
       }
     }
@@ -573,8 +591,8 @@ export async function POST(req: NextRequest) {
         return createSseEventResponse(
           [
             ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
-            ...(kbHits.length > 0 ? [{ kbHits }] : []),
-            ...(sourceHits.length > 0 ? [{ sourceHits }] : []),
+            ...(effectiveKbHits.length > 0 ? [{ kbHits: effectiveKbHits }] : []),
+            ...(effectiveSourceHits.length > 0 ? [{ sourceHits: effectiveSourceHits }] : []),
             { content: answerText },
           ]
         );
@@ -586,7 +604,7 @@ export async function POST(req: NextRequest) {
     const messages = [
       { role: "system", content: systemPrompt },
       ...(selectedScopeContext ? [{ role: "system", content: selectedScopeContext }] : []),
-      ...(knowledgeContext ? [{ role: "system", content: knowledgeContext }] : []),
+      ...(effectiveKnowledgeContext ? [{ role: "system", content: effectiveKnowledgeContext }] : []),
       ...(fileContext ? [{ role: "system", content: fileContext }] : []),
       ...recentHistory.map((item) => ({
         role: item.role,
@@ -680,12 +698,12 @@ export async function POST(req: NextRequest) {
             safeEnqueue(`data: ${JSON.stringify({ questionDiagnosis: diagnosis })}\n\n`);
           }
 
-          if (kbHits.length > 0) {
-            safeEnqueue(`data: ${JSON.stringify({ kbHits })}\n\n`);
+          if (effectiveKbHits.length > 0) {
+            safeEnqueue(`data: ${JSON.stringify({ kbHits: effectiveKbHits })}\n\n`);
           }
 
-          if (sourceHits.length > 0) {
-            safeEnqueue(`data: ${JSON.stringify({ sourceHits })}\n\n`);
+          if (effectiveSourceHits.length > 0) {
+            safeEnqueue(`data: ${JSON.stringify({ sourceHits: effectiveSourceHits })}\n\n`);
           }
 
           while (true) {
