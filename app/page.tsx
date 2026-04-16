@@ -472,6 +472,11 @@ export default function Home() {
 
     try {
       const convo = currentConvos.find((c) => c.id === conversationId);
+      const hasShownClarificationGuide = Boolean(
+        (convo?.messages || []).some(
+          (m) => m.role === "assistant" && m.questionDiagnosis?.mode === "clarify" && m.content.trim()
+        )
+      );
       const history = (convo?.messages || [])
         .filter((m) => m.content)
         .slice(0, -1)
@@ -494,6 +499,7 @@ export default function Home() {
           answerMode: selectedAnswerMode,
           knowledgeMode: DEFAULT_KNOWLEDGE_MODE,
           webSearchEnabled,
+          hasShownClarificationGuide,
         }),
       });
 
@@ -527,7 +533,10 @@ export default function Home() {
                   setConversations((prev) =>
                     updateLastAssistantMessage(prev, conversationId, {
                       questionDiagnosis: parsed.questionDiagnosis,
-                      modelId: parsed.questionDiagnosis.mode === "answer" ? selectedModelId : undefined,
+                      modelId:
+                        parsed.questionDiagnosis.mode === "answer" || hasShownClarificationGuide
+                          ? selectedModelId
+                          : undefined,
                     })
                   );
                 }

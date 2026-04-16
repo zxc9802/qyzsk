@@ -9,6 +9,7 @@ import { sanitizeAssistantOutput } from "@/lib/sanitize-assistant-output";
 interface MessageBubbleProps {
   message: Message;
   isStreaming?: boolean;
+  showQuestionDiagnosis?: boolean;
 }
 
 function escapeHtmlText(text: string): string {
@@ -330,10 +331,14 @@ function renderQuestionDiagnosisPanel(diagnosis: QuestionDiagnosis) {
   );
 }
 
-export default function MessageBubble({ message, isStreaming = false }: MessageBubbleProps) {
+export default function MessageBubble({
+  message,
+  isStreaming = false,
+  showQuestionDiagnosis = false,
+}: MessageBubbleProps) {
   const isUser = message.role === "user";
   const displayContent = isUser ? message.content : sanitizeAssistantOutput(message.content);
-  const questionDiagnosis = !isUser ? message.questionDiagnosis : undefined;
+  const questionDiagnosis = !isUser && showQuestionDiagnosis ? message.questionDiagnosis : undefined;
   const modelLabel = !isUser && message.modelId && questionDiagnosis?.mode !== "clarify"
     ? getChatModelOption(message.modelId).label
     : null;

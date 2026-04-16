@@ -357,7 +357,10 @@ function buildGeminiAnswerContext(options: {
     .join("\n\n");
 }
 
-function buildDiagnosisAnswerGuardrail(diagnosis?: QuestionDiagnosis): string {
+function buildDiagnosisAnswerGuardrail(
+  diagnosis: QuestionDiagnosis | undefined,
+  options?: { answerNaturally?: boolean }
+): string {
   if (!diagnosis) return "";
 
   const collectedText = (diagnosis.collectedSlots || []).join("、") || "无";
@@ -370,6 +373,16 @@ function buildDiagnosisAnswerGuardrail(diagnosis?: QuestionDiagnosis): string {
       "注意：本轮信息已经足够回答，不要在回答结尾再发起一轮新的补充字段采集。",
       "不要把用户已经给过的字段再次当成缺失信息追问。",
       "如果要建议继续补充，只能作为可选下一步，且必须与当前场景一致，不能另起一套新的字段模板。",
+    ].join("\n");
+  }
+
+  if (options?.answerNaturally) {
+    return [
+      `当前诊断状态：${diagnosis.categoryLabel}｜信息仍不完整｜场景=${scopeText}｜已收集=${collectedText}｜仍缺=${missingText}`,
+      "注意：系统引导卡片已经出现过，或本轮不适合再次打断用户。",
+      "这轮请直接基于已有信息给出阶段性判断、原因和下一步建议。",
+      "如果还需补信息，只能在回答结尾自然提醒仍缺哪些字段，不要输出系统引导口吻，不要再给整套补充模板。",
+      "不要重复追问用户已经给过的字段，不要切换到新的问题分类。",
     ].join("\n");
   }
 
@@ -411,7 +424,17 @@ export async function POST(req: NextRequest) {
       return appSessionErrorResponse(error, req);
     }
 
-    const { message, role, history, conversationId, modelId, answerMode, knowledgeMode, webSearchEnabled } = await req.json();
+    const {
+      message,
+      role,
+      history,
+      conversationId,
+      modelId,
+      answerMode,
+      knowledgeMode,
+      webSearchEnabled,
+      hasShownClarificationGuide,
+    } = await req.json();
 
     if (!message || typeof message !== "string") {
       return createJsonResponse({ error: "Missing message" }, 400);
@@ -434,6 +457,7 @@ export async function POST(req: NextRequest) {
         ? knowledgeMode
         : DEFAULT_KNOWLEDGE_MODE;
     const resolvedWebSearchEnabled = webSearchEnabled === true;
+    const resolvedHasShownClarificationGuide = hasShownClarificationGuide === true;
     const modelOption = getChatModelOption(resolvedModelId);
     const provider = resolveProviderConfig(modelOption);
     const geminiClient = buildGeminiClient(modelOption, provider);
@@ -574,7 +598,12 @@ export async function POST(req: NextRequest) {
     const effectiveKnowledgeContext = webSearchPolicy.shouldDownweightLocalKnowledge ? "" : knowledgeContext;
     const effectiveKbHits = webSearchPolicy.shouldDownweightLocalKnowledge ? [] : kbHits;
     const effectiveSourceHits = webSearchPolicy.shouldDownweightLocalKnowledge ? [] : sourceHits;
-    const diagnosisGuardrailContext = buildDiagnosisAnswerGuardrail(diagnosis);
+    const answerNaturallyWithMissingInfo =
+      resolvedHasShownClarificationGuide
+      || (diagnosis?.mode === "clarify" && webSearchPolicy.shouldBypassClarification);
+    const diagnosisGuardrailContext = buildDiagnosisAnswerGuardrail(diagnosis, {
+      answerNaturally: answerNaturallyWithMissingInfo,
+    });
     const answerContext = buildGeminiAnswerContext({
       diagnosisGuardrailContext,
       selectedScopeContext,
@@ -588,7 +617,11 @@ export async function POST(req: NextRequest) {
       clarificationReply,
     });
 
-    if (clarificationReply && !webSearchPolicy.shouldBypassClarification) {
+    if (
+      clarificationReply
+      && !resolvedHasShownClarificationGuide
+      && !webSearchPolicy.shouldBypassClarification
+    ) {
       return createSseEventResponse(
         [
           ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
