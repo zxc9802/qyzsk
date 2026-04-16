@@ -15,8 +15,11 @@ import { generateResponsesWebSearch } from "@/lib/server/openai-web-search";
 import { buildRetrievalOrchestratorResult } from "@/lib/server/retrieval-orchestrator";
 import { buildWebSearchInstruction, buildWebSearchPolicyDecision } from "@/lib/server/web-search-policy";
 import {
+  applyDiagnosisReview,
   buildModelDiagnosisPrompt,
   diagnoseQuestion,
+  getLatestClarification,
+  parseDiagnosisReview,
   parseModelDiagnosisResult,
   type DiagnosisHistoryMessage,
 } from "@/lib/server/question-diagnosis";
@@ -261,6 +264,40 @@ function mergeSourceHits(...groups: RetrievalSourceHit[][]): RetrievalSourceHit[
   return Array.from(merged.values());
 }
 
+function mergeUniqueStrings(...groups: Array<string[] | undefined>): string[] {
+  return Array.from(new Set(groups.flatMap((group) => group || [])));
+}
+
+function mergeDiagnosisContext(
+  primary: QuestionDiagnosis,
+  fallback: QuestionDiagnosis
+): QuestionDiagnosis {
+  if (primary.categoryId !== fallback.categoryId) {
+    return primary;
+  }
+
+  const mergedCollectedSlots = mergeUniqueStrings(fallback.collectedSlots, primary.collectedSlots);
+  const mergedScopeOptions = primary.scopeOptions?.length
+    ? primary.scopeOptions
+    : fallback.scopeOptions;
+  const mergedClarificationStage = primary.clarificationStage || fallback.clarificationStage;
+  const mergedSelectedScope = primary.selectedScope || fallback.selectedScope;
+  const shouldLiftCompleteness =
+    mergedCollectedSlots.length > (primary.collectedSlots?.length || 0)
+    || (fallback.mode === "answer" && primary.mode === "clarify");
+
+  return {
+    ...primary,
+    clarificationStage: mergedClarificationStage,
+    scopeOptions: mergedScopeOptions,
+    selectedScope: mergedSelectedScope,
+    collectedSlots: mergedCollectedSlots.length > 0 ? mergedCollectedSlots : primary.collectedSlots,
+    completenessScore: shouldLiftCompleteness
+      ? Math.max(primary.completenessScore, fallback.completenessScore)
+      : primary.completenessScore,
+  };
+}
+
 function buildGeminiGroundingSourceHits(metadata?: GeminiGroundingMetadata): RetrievalSourceHit[] {
   if (!metadata?.groundingChunks?.length) return [];
 
@@ -374,7 +411,9 @@ export async function POST(req: NextRequest) {
     const resolvedWebSearchEnabled = webSearchEnabled === true;
     const modelOption = getChatModelOption(resolvedModelId);
     const provider = resolveProviderConfig(modelOption);
+    const geminiClient = buildGeminiClient(modelOption, provider);
     const recentHistory = normalizeHistory(history);
+    const diagnosisHistory = recentHistory as DiagnosisHistoryMessage[];
     const mediaContext =
       typeof conversationId === "string" && conversationId && shouldInspectRawMedia(message)
         ? await buildConversationMediaContext(userId, conversationId)
@@ -387,17 +426,41 @@ export async function POST(req: NextRequest) {
         typeof conversationId === "string" && conversationId
           ? await buildConversationFileDiagnosisContext(userId, conversationId, message)
           : "";
-      const fallbackDiagnosisResult = diagnoseQuestion(message, role || "new", recentHistory as DiagnosisHistoryMessage[]);
+      const latestClarification = getLatestClarification(diagnosisHistory);
+      const fallbackDiagnosisResult = diagnoseQuestion(message, role || "new", diagnosisHistory);
       let diagnosisResult = fallbackDiagnosisResult;
 
       if (provider.apiUrl && provider.apiKey) {
+        let diagnosisReview = null;
+
+        if (fallbackDiagnosisResult.modelReviewPrompt) {
+          const reviewContent =
+            geminiClient && mediaContext.hasMedia
+              ? await generateGeminiTextWithClient({
+                  client: geminiClient,
+                  model: modelOption.apiModel,
+                  systemInstruction: "你只做 JSON 诊断输出，不做业务回答，不要输出多余文字。",
+                  parts: [{ text: fallbackDiagnosisResult.modelReviewPrompt }, ...mediaContext.geminiParts],
+                  temperature: 0.1,
+                }).catch(() => null)
+              : await runModelDiagnosis(
+                  provider.apiUrl,
+                  provider.apiKey,
+                  modelOption.apiModel,
+                  mediaContext.hasMedia
+                    ? [buildOpenAITextPart(fallbackDiagnosisResult.modelReviewPrompt), ...mediaContext.openAIParts]
+                    : fallbackDiagnosisResult.modelReviewPrompt
+                );
+
+          diagnosisReview = parseDiagnosisReview(reviewContent || "");
+        }
+
         const diagnosisPrompt = buildModelDiagnosisPrompt(
           message,
           role || "new",
-          recentHistory as DiagnosisHistoryMessage[],
+          diagnosisHistory,
           diagnosisFileContext
         );
-        const geminiClient = buildGeminiClient(modelOption, provider);
         const modelDiagnosisContent =
           geminiClient && mediaContext.hasMedia
             ? await generateGeminiTextWithClient({
@@ -416,7 +479,32 @@ export async function POST(req: NextRequest) {
                   : diagnosisPrompt
               );
 
-        diagnosisResult = parseModelDiagnosisResult(modelDiagnosisContent || "", message) || fallbackDiagnosisResult;
+        const parsedModelDiagnosis = parseModelDiagnosisResult(modelDiagnosisContent || "", message);
+        if (parsedModelDiagnosis) {
+          const mergedModelDiagnosis = mergeDiagnosisContext(
+            parsedModelDiagnosis.diagnosis,
+            fallbackDiagnosisResult.diagnosis
+          );
+          const shouldPreferFallback =
+            mergedModelDiagnosis.categoryId === fallbackDiagnosisResult.diagnosis.categoryId
+            && fallbackDiagnosisResult.diagnosis.mode === "answer"
+            && mergedModelDiagnosis.mode === "clarify"
+            && fallbackDiagnosisResult.diagnosis.completenessScore >= mergedModelDiagnosis.completenessScore;
+
+          diagnosisResult = shouldPreferFallback
+            ? fallbackDiagnosisResult
+            : {
+                ...parsedModelDiagnosis,
+                diagnosis: mergedModelDiagnosis,
+              };
+        }
+
+        diagnosisResult = applyDiagnosisReview(
+          diagnosisReview,
+          latestClarification,
+          diagnosisResult.diagnosis,
+          diagnosisResult.clarificationReply || null
+        );
       }
 
       diagnosis = diagnosisResult.diagnosis;
@@ -443,7 +531,6 @@ export async function POST(req: NextRequest) {
     const fileContext = retrieval.fileContext;
     const kbHits = retrieval.kbHits;
     const sourceHits = retrieval.sourceHits;
-    const geminiClient = buildGeminiClient(modelOption, provider);
     const canUseReliableWebSearch = isGptModel(modelOption) && !mediaContext.hasMedia && provider.apiKey !== "";
     const webSearchPolicy = buildWebSearchPolicyDecision({
       query: message,
