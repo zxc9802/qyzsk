@@ -787,8 +787,16 @@ export function getLatestClarification(history: DiagnosisHistoryMessage[]): Ques
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const message = history[index];
     if (message.role !== "assistant") continue;
-    if (message.questionDiagnosis?.mode === "clarify") {
-      return message.questionDiagnosis;
+    const diagnosis = message.questionDiagnosis;
+    if (!diagnosis) continue;
+    if (
+      diagnosis.mode === "clarify"
+      || diagnosis.clarificationStage === "choose_scope"
+      || diagnosis.clarificationStage === "fill_slots"
+      || Boolean(diagnosis.selectedScope)
+      || Boolean(diagnosis.collectedSlots?.length)
+    ) {
+      return diagnosis;
     }
   }
 
