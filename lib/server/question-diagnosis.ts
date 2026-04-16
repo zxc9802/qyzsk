@@ -873,7 +873,7 @@ function buildFillSlotsReply(
   definition: QuestionCategoryDefinition,
   diagnosis: QuestionDiagnosis
 ): string {
-  const template = definition.templateLines?.join("\n") || "- 请补充更具体的业务背景：";
+  const template = buildClarificationTemplate(definition, diagnosis);
   const remainingText = diagnosis.missingSlots.slice(0, 3).join("、");
   const scopeText = diagnosis.selectedScope ? `“${diagnosis.selectedScope}”` : "这个场景";
 
@@ -885,6 +885,37 @@ function buildFillSlotsReply(
   ].join("\n");
 }
 
+function matchesTemplateLineSlot(line: string, slot: SlotDefinition): boolean {
+  const normalizedLine = normalizeCompact(line.replace(/^[\-\d.)、\s]+/u, ""));
+  if (!normalizedLine) return false;
+
+  return getSlotAliases(slot).some((alias) => {
+    const normalizedAlias = normalizeCompact(alias);
+    return normalizedAlias ? normalizedLine.includes(normalizedAlias) : false;
+  });
+}
+
+function buildClarificationTemplate(
+  definition: QuestionCategoryDefinition,
+  diagnosis: QuestionDiagnosis
+): string {
+  const templateLines = definition.templateLines || [];
+  if (templateLines.length === 0) {
+    return "- 请补充更具体的业务背景：";
+  }
+
+  if (!definition.slots || diagnosis.missingSlots.length === 0) {
+    return templateLines.join("\n");
+  }
+
+  const missingSlotSet = new Set(diagnosis.missingSlots);
+  const matchedLines = templateLines.filter((line) =>
+    definition.slots!.some((slot) => missingSlotSet.has(slot.label) && matchesTemplateLineSlot(line, slot))
+  );
+
+  return (matchedLines.length > 0 ? matchedLines : templateLines).join("\n");
+}
+
 function buildClarificationReply(
   normalizedQuery: string,
   definition: QuestionCategoryDefinition,
@@ -894,16 +925,20 @@ function buildClarificationReply(
     return buildFillSlotsReply(definition, diagnosis);
   }
 
-  const template = definition.templateLines?.join("\n") || "- 请补充更具体的业务背景：";
+  const template = buildClarificationTemplate(definition, diagnosis);
   const briefMissingText = diagnosis.missingSlots.slice(0, 3).join("、");
-  const narrowScope = shouldNarrowScope(normalizedQuery, definition, diagnosis);
+  const scopeOptions = diagnosis.scopeOptions?.length ? diagnosis.scopeOptions : definition.scopeOptions;
+  const narrowScope =
+    diagnosis.clarificationStage === "choose_scope"
+      ? Boolean(scopeOptions?.length)
+      : shouldNarrowScope(normalizedQuery, definition, diagnosis);
 
   if (narrowScope) {
     return [
       "这个问题范围还太大，我先帮你缩一下，不然很容易答成泛建议。",
       "",
       "你现在更想问哪一种？",
-      ...(definition.scopeOptions || []).map((item, index) => `${index + 1}. ${item}`),
+      ...(scopeOptions || []).map((item, index) => `${index + 1}. ${item}`),
       "",
       "如果你已经有明确场景，也可以直接按这个格式补给我：",
       template,
@@ -918,6 +953,16 @@ function buildClarificationReply(
     "",
     "你补完后，我就按公司的框架直接往下拆。",
   ].join("\n");
+}
+
+export function buildClarificationReplyForDiagnosis(
+  diagnosis: QuestionDiagnosis,
+  query = ""
+): string | null {
+  if (diagnosis.mode !== "clarify") return null;
+
+  const definition = getCategoryDefinitionById(diagnosis.categoryId);
+  return buildClarificationReply(normalizeQuery(query), definition, diagnosis);
 }
 
 function buildScopeSelectionDiagnosis(

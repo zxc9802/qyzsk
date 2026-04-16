@@ -16,6 +16,7 @@ import { buildRetrievalOrchestratorResult } from "@/lib/server/retrieval-orchest
 import { buildWebSearchInstruction, buildWebSearchPolicyDecision } from "@/lib/server/web-search-policy";
 import {
   applyDiagnosisReview,
+  buildClarificationReplyForDiagnosis,
   buildModelDiagnosisPrompt,
   diagnoseQuestion,
   getLatestClarification,
@@ -331,6 +332,7 @@ function shouldInspectRawMedia(message: string): boolean {
 }
 
 function buildGeminiAnswerContext(options: {
+  diagnosisGuardrailContext: string;
   selectedScopeContext: string;
   knowledgeContext: string;
   fileContext: string;
@@ -344,6 +346,7 @@ function buildGeminiAnswerContext(options: {
     : "";
 
   return [
+    options.diagnosisGuardrailContext,
     options.selectedScopeContext,
     options.knowledgeContext,
     options.fileContext,
@@ -352,6 +355,28 @@ function buildGeminiAnswerContext(options: {
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function buildDiagnosisAnswerGuardrail(diagnosis?: QuestionDiagnosis): string {
+  if (!diagnosis) return "";
+
+  const collectedText = (diagnosis.collectedSlots || []).join("、") || "无";
+  const missingText = diagnosis.missingSlots.join("、") || "无";
+  const scopeText = diagnosis.selectedScope || "无";
+
+  if (diagnosis.mode === "answer") {
+    return [
+      `当前诊断状态：${diagnosis.categoryLabel}｜可直接回答｜场景=${scopeText}｜已收集=${collectedText}｜仍缺=${missingText}`,
+      "注意：本轮信息已经足够回答，不要在回答结尾再发起一轮新的补充字段采集。",
+      "不要把用户已经给过的字段再次当成缺失信息追问。",
+      "如果要建议继续补充，只能作为可选下一步，且必须与当前场景一致，不能另起一套新的字段模板。",
+    ].join("\n");
+  }
+
+  return [
+    `当前诊断状态：${diagnosis.categoryLabel}｜先补信息｜场景=${scopeText}｜已收集=${collectedText}｜仍缺=${missingText}`,
+    "如果仍需补信息，只能围绕仍缺字段追问，不要重复已给过的字段。",
+  ].join("\n");
 }
 
 function readUpstreamError(text: string): UpstreamErrorDetails {
@@ -505,6 +530,13 @@ export async function POST(req: NextRequest) {
           diagnosisResult.diagnosis,
           diagnosisResult.clarificationReply || null
         );
+
+        if (diagnosisResult.diagnosis.mode === "clarify") {
+          diagnosisResult = {
+            ...diagnosisResult,
+            clarificationReply: buildClarificationReplyForDiagnosis(diagnosisResult.diagnosis, message),
+          };
+        }
       }
 
       diagnosis = diagnosisResult.diagnosis;
@@ -542,7 +574,9 @@ export async function POST(req: NextRequest) {
     const effectiveKnowledgeContext = webSearchPolicy.shouldDownweightLocalKnowledge ? "" : knowledgeContext;
     const effectiveKbHits = webSearchPolicy.shouldDownweightLocalKnowledge ? [] : kbHits;
     const effectiveSourceHits = webSearchPolicy.shouldDownweightLocalKnowledge ? [] : sourceHits;
+    const diagnosisGuardrailContext = buildDiagnosisAnswerGuardrail(diagnosis);
     const answerContext = buildGeminiAnswerContext({
+      diagnosisGuardrailContext,
       selectedScopeContext,
       knowledgeContext: effectiveKnowledgeContext,
       fileContext,
@@ -690,6 +724,7 @@ export async function POST(req: NextRequest) {
 
     const messages = [
       { role: "system", content: systemPrompt },
+      ...(diagnosisGuardrailContext ? [{ role: "system", content: diagnosisGuardrailContext }] : []),
       ...(selectedScopeContext ? [{ role: "system", content: selectedScopeContext }] : []),
       ...(effectiveKnowledgeContext ? [{ role: "system", content: effectiveKnowledgeContext }] : []),
       ...(fileContext ? [{ role: "system", content: fileContext }] : []),
