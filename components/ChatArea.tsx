@@ -102,6 +102,9 @@ export default function ChatArea({
   }, [conversationId, messages.length]);
 
   const isEmpty = messages.length === 0;
+  const firstClarificationMessageId = messages.find(
+    (item) => item.role === "assistant" && item.questionDiagnosis?.mode === "clarify"
+  )?.id;
 
   return (
     <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -181,6 +184,7 @@ export default function ChatArea({
                 key={msg.id}
                 message={msg}
                 isStreaming={isStreaming && i === messages.length - 1 && msg.role === "assistant"}
+                showQuestionDiagnosis={msg.id === firstClarificationMessageId}
               />
             ))}
           </div>
