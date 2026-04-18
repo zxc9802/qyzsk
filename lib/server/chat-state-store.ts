@@ -491,6 +491,31 @@ export async function getUserChatState(userId: string): Promise<ChatStatePayload
   });
 }
 
+export async function getConversationRecord(userId: string, conversationId: string): Promise<Conversation | null> {
+  const normalizedConversationId = normalizeId(conversationId);
+  if (!normalizedConversationId) return null;
+
+  if (shouldUseLocalStateStore()) {
+    const currentState = await readLocalState(userId);
+    return currentState.conversations.find((conversation) => conversation.id === normalizedConversationId) || null;
+  }
+
+  return withDbClient(async (client) => {
+    const result = await client.query<ConversationRow>(
+      `
+        SELECT id, title, messages, created_at_ms, updated_at_ms
+        FROM kb_chat_conversations
+        WHERE user_id = $1 AND id = $2
+        LIMIT 1
+      `,
+      [userId, normalizedConversationId]
+    );
+
+    const row = result.rows[0];
+    return row ? deserializeConversation(row) : null;
+  });
+}
+
 export async function saveUserChatState(userId: string, input: unknown): Promise<SaveStateResult> {
   const normalized = normalizeStatePayload(input);
   const activeId = normalized.activeId;
