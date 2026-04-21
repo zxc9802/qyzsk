@@ -18,5 +18,25 @@
     "id": "wiki-004",
     "query": "我刚入职，问 AI 之前应该先准备什么信息？",
     "expectedWikiIds": ["roles/新员工提问原则"]
+  },
+  {
+    "id": "wiki-005",
+    "query": "店铺不出单怎么办？",
+    "expectedWikiIds": ["concepts/运营漏斗诊断"]
+  },
+  {
+    "id": "wiki-006",
+    "query": "一直不出单",
+    "expectedWikiIds": ["concepts/运营漏斗诊断"]
+  },
+  {
+    "id": "wiki-007",
+    "query": "出单很少怎么办",
+    "expectedWikiIds": ["concepts/运营漏斗诊断"]
+  },
+  {
+    "id": "wiki-008",
+    "query": "今天天气怎么样",
+    "expectedWikiIds": []
   }
 ]
