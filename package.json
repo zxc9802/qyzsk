@@ -7,8 +7,8 @@
     "npm": "10.x"
   },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "wiki:import-docx": "node --import ./scripts/wiki/register-alias.mjs --experimental-strip-types ./scripts/wiki/import-docx-batch.ts"
