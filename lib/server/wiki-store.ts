@@ -369,13 +369,15 @@ async function ensureSchemaFile() {
 }
 
 async function syncPublishedWikiPageToRagIfAvailable(page: WikiPage) {
+  const modulePath = ["@/lib/server", "rag-indexer"].join("/");
+
   try {
-    const ragModule = await import("@/lib/server/rag-indexer");
+    const ragModule = await import(modulePath);
     await ragModule.syncPublishedWikiPageToRag(page);
   } catch (error) {
     if (
       error instanceof Error &&
-      (error.message.includes("@/lib/server/rag-indexer") || error.message.includes("rag-indexer"))
+      (error.message.includes(modulePath) || error.message.includes("rag-indexer"))
     ) {
       return;
     }

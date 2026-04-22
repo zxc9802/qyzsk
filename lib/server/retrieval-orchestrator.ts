@@ -250,13 +250,15 @@ async function searchCanonicalWikiPagesByVectorWithFallback(options: {
   query: string;
   topK?: number;
 }): Promise<VectorWikiSearchResult> {
+  const modulePath = ["@/lib/server", "rag-retrieval"].join("/");
+
   try {
-    const ragModule = await import("@/lib/server/rag-retrieval");
+    const ragModule = await import(modulePath);
     return ragModule.searchCanonicalWikiPagesByVector(options);
   } catch (error) {
     if (
       error instanceof Error &&
-      (error.message.includes("@/lib/server/rag-retrieval") || error.message.includes("rag-retrieval"))
+      (error.message.includes(modulePath) || error.message.includes("rag-retrieval"))
     ) {
       return [];
     }

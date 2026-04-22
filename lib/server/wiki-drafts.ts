@@ -165,8 +165,13 @@ function parseDraftPayloads(raw: string): DraftModelPayload[] | null {
       return parsed;
     }
 
-    if (parsed && typeof parsed === "object" && Array.isArray(parsed.drafts)) {
-      return parsed.drafts;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "drafts" in parsed &&
+      Array.isArray((parsed as DraftBatchModelPayload).drafts)
+    ) {
+      return (parsed as DraftBatchModelPayload).drafts || [];
     }
 
     if (parsed && typeof parsed === "object") {
