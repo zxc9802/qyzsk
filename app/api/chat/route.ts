@@ -28,6 +28,18 @@ import {
   appSessionErrorResponse,
   assertAppUserSession,
 } from "@/lib/server/app-session";
+import {
+  buildConversationMemoryContext,
+  buildEmergencyHistoryWindow,
+  estimatePromptChars,
+  evaluateAndPersistConversationContext,
+  getContextBudgetConfig,
+  getConversationContextState,
+  isLikelyContextOverflowError,
+  shouldUseEmergencyCompression,
+  type ConversationContextState,
+} from "@/lib/server/conversation-context";
+import { enqueueConversationCompressionJob } from "@/lib/server/conversation-context-queue";
 import { ensureConversationRecord } from "@/lib/server/chat-state-store";
 import type { QuestionDiagnosis, RetrievalSourceHit } from "@/lib/types";
 
@@ -336,6 +348,7 @@ function buildGeminiAnswerContext(options: {
   selectedScopeContext: string;
   knowledgeContext: string;
   fileContext: string;
+  conversationMemoryContext: string;
   recentHistory: HistoryMessage[];
   message: string;
 }): string {
@@ -350,6 +363,7 @@ function buildGeminiAnswerContext(options: {
     options.selectedScopeContext,
     options.knowledgeContext,
     options.fileContext,
+    options.conversationMemoryContext,
     historyText,
     `当前用户问题：${options.message}`,
   ]
@@ -415,6 +429,58 @@ function readUpstreamError(text: string): UpstreamErrorDetails {
   return { message: fallback.slice(0, 300) };
 }
 
+async function attemptEmergencyCompression(options: {
+  userId: string;
+  conversationId?: string;
+  modelId: string;
+  recentHistory: HistoryMessage[];
+  currentContextState: ConversationContextState | null;
+}): Promise<{
+  contextState: ConversationContextState | null;
+  recentHistory: HistoryMessage[];
+}> {
+  const reducedHistory = buildEmergencyHistoryWindow(options.recentHistory, 4);
+  if (!options.conversationId) {
+    return {
+      contextState: options.currentContextState,
+      recentHistory: reducedHistory,
+    };
+  }
+
+  try {
+    const nextState = await evaluateAndPersistConversationContext({
+      userId: options.userId,
+      conversationId: options.conversationId,
+      modelId: options.modelId,
+      forceTier: "full",
+    });
+
+    return {
+      contextState: nextState,
+      recentHistory: reducedHistory,
+    };
+  } catch (error) {
+    console.error("Emergency conversation compression failed:", error);
+    try {
+      await enqueueConversationCompressionJob({
+        userId: options.userId,
+        conversationId: options.conversationId,
+        modelId: options.modelId,
+        trigger: "emergency",
+        requestedAtMs: Date.now(),
+        forceTier: "full",
+      });
+    } catch (enqueueError) {
+      console.error("Emergency conversation compression enqueue failed:", enqueueError);
+    }
+
+    return {
+      contextState: options.currentContextState,
+      recentHistory: reducedHistory,
+    };
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     let userId = "";
@@ -461,7 +527,13 @@ export async function POST(req: NextRequest) {
     const modelOption = getChatModelOption(resolvedModelId);
     const provider = resolveProviderConfig(modelOption);
     const geminiClient = buildGeminiClient(modelOption, provider);
-    const recentHistory = normalizeHistory(history);
+    const budgetConfig = getContextBudgetConfig(resolvedModelId);
+    let recentHistory = normalizeHistory(history);
+    let conversationContextState =
+      typeof conversationId === "string" && conversationId.trim()
+        ? await getConversationContextState(userId, conversationId)
+        : null;
+    let conversationMemoryContext = buildConversationMemoryContext(conversationContextState?.memoryText || "");
     const diagnosisHistory = recentHistory as DiagnosisHistoryMessage[];
     const mediaContext =
       typeof conversationId === "string" && conversationId && shouldInspectRawMedia(message)
@@ -604,14 +676,47 @@ export async function POST(req: NextRequest) {
     const diagnosisGuardrailContext = buildDiagnosisAnswerGuardrail(diagnosis, {
       answerNaturally: answerNaturallyWithMissingInfo,
     });
-    const answerContext = buildGeminiAnswerContext({
+    let answerContext = buildGeminiAnswerContext({
       diagnosisGuardrailContext,
       selectedScopeContext,
       knowledgeContext: effectiveKnowledgeContext,
       fileContext,
+      conversationMemoryContext,
       recentHistory,
       message,
     });
+    const estimatedPromptChars = estimatePromptChars({
+      systemPrompt,
+      diagnosisGuardrailContext,
+      selectedScopeContext,
+      knowledgeContext: effectiveKnowledgeContext,
+      fileContext,
+      memoryText: conversationMemoryContext,
+      recentHistory,
+      message,
+    });
+    if (shouldUseEmergencyCompression(estimatedPromptChars, budgetConfig)) {
+      const emergencyState = await attemptEmergencyCompression({
+        userId,
+        conversationId: typeof conversationId === "string" ? conversationId : undefined,
+        modelId: resolvedModelId,
+        recentHistory,
+        currentContextState: conversationContextState,
+      });
+
+      conversationContextState = emergencyState.contextState;
+      recentHistory = emergencyState.recentHistory;
+      conversationMemoryContext = buildConversationMemoryContext(emergencyState.contextState?.memoryText || "");
+      answerContext = buildGeminiAnswerContext({
+        diagnosisGuardrailContext,
+        selectedScopeContext,
+        knowledgeContext: effectiveKnowledgeContext,
+        fileContext,
+        conversationMemoryContext,
+        recentHistory,
+        message,
+      });
+    }
     const webSearchInstruction = buildWebSearchInstruction({
       policy: webSearchPolicy,
       clarificationReply,
@@ -755,13 +860,17 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const messages = [
+    const buildProviderMessages = (
+      currentRecentHistory: HistoryMessage[],
+      currentConversationMemoryContext: string
+    ) => [
       { role: "system", content: systemPrompt },
       ...(diagnosisGuardrailContext ? [{ role: "system", content: diagnosisGuardrailContext }] : []),
       ...(selectedScopeContext ? [{ role: "system", content: selectedScopeContext }] : []),
       ...(effectiveKnowledgeContext ? [{ role: "system", content: effectiveKnowledgeContext }] : []),
       ...(fileContext ? [{ role: "system", content: fileContext }] : []),
-      ...recentHistory.map((item) => ({
+      ...(currentConversationMemoryContext ? [{ role: "system", content: currentConversationMemoryContext }] : []),
+      ...currentRecentHistory.map((item) => ({
         role: item.role,
         content: item.content,
       })),
@@ -773,7 +882,8 @@ export async function POST(req: NextRequest) {
       },
     ];
 
-    const response = await fetch(provider.apiUrl, {
+    let messages = buildProviderMessages(recentHistory, conversationMemoryContext);
+    let response = await fetch(provider.apiUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${provider.apiKey}`,
@@ -788,10 +898,51 @@ export async function POST(req: NextRequest) {
       }),
     });
 
+    let providerError: UpstreamErrorDetails | null = null;
+
     if (!response.ok) {
       const errText = await response.text();
-      const upstreamError = readUpstreamError(errText);
-      console.error("Chat provider error:", provider.displayName, response.status, upstreamError);
+      providerError = readUpstreamError(errText);
+      console.error("Chat provider error:", provider.displayName, response.status, providerError);
+
+      if (isLikelyContextOverflowError(providerError.message)) {
+        const emergencyState = await attemptEmergencyCompression({
+          userId,
+          conversationId: typeof conversationId === "string" ? conversationId : undefined,
+          modelId: resolvedModelId,
+          recentHistory,
+          currentContextState: conversationContextState,
+        });
+        conversationContextState = emergencyState.contextState;
+        recentHistory = emergencyState.recentHistory;
+        conversationMemoryContext = buildConversationMemoryContext(emergencyState.contextState?.memoryText || "");
+        messages = buildProviderMessages(recentHistory, conversationMemoryContext);
+        response = await fetch(provider.apiUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${provider.apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: modelOption.apiModel,
+            messages,
+            stream: true,
+            max_tokens: 4096,
+            temperature: 0.3,
+          }),
+        });
+        if (!response.ok) {
+          const retryErrText = await response.text();
+          providerError = readUpstreamError(retryErrText);
+          console.error("Chat provider retry error:", provider.displayName, response.status, providerError);
+        } else {
+          providerError = null;
+        }
+      }
+    }
+
+    if (!response.ok) {
+      const upstreamError = providerError || { message: "模型服务调用失败。" };
 
       const isQuotaError =
         upstreamError.code === "insufficient_quota" ||

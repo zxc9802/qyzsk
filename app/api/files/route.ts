@@ -18,6 +18,9 @@ import {
   enqueueFileProcessingJobs,
 } from "@/lib/server/processing-queue";
 import {
+  deleteConversationContextState,
+} from "@/lib/server/conversation-context";
+import {
   appSessionErrorResponse,
   assertAppUserSession,
 } from "@/lib/server/app-session";
@@ -183,6 +186,9 @@ export async function DELETE(req: NextRequest) {
   }
 
   cancelConversationProcessing(userId, conversationId);
-  await deleteConversationFiles(userId, conversationId);
+  await Promise.all([
+    deleteConversationFiles(userId, conversationId),
+    deleteConversationContextState(userId, conversationId),
+  ]);
   return json({ ok: true });
 }

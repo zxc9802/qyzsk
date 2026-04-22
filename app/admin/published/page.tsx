@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { buildSeeAlsoRelations, formatWikiRelationsText, parseWikiRelationsText } from "@/lib/wiki-relations";
 import {
   AdminErrorBanner,
   AdminPageHeader,
@@ -24,6 +25,7 @@ type PageEditorState = {
   rolesText: string;
   sourceIdsText: string;
   relatedPagesText: string;
+  relationsText: string;
   content: string;
 };
 
@@ -34,8 +36,20 @@ function buildPageEditorState(page: WikiPage): PageEditorState {
     rolesText: page.roles.join("、"),
     sourceIdsText: page.sourceIds.join(", "),
     relatedPagesText: page.relatedPages.join("\n"),
+    relationsText: formatWikiRelationsText(
+      page.relations.length > 0 ? page.relations : buildSeeAlsoRelations(page.relatedPages)
+    ),
     content: page.content,
   };
+}
+
+function resolvePageRelations(editor: Pick<PageEditorState, "relationsText" | "relatedPagesText">) {
+  const typedRelations = parseWikiRelationsText(editor.relationsText);
+  if (typedRelations.length > 0) {
+    return typedRelations;
+  }
+
+  return buildSeeAlsoRelations(splitText(editor.relatedPagesText, /[\n,，]+/u));
 }
 
 export default function AdminPublishedPage() {
@@ -103,6 +117,7 @@ export default function AdminPublishedPage() {
         page.roles.join(" "),
         page.sourceIds.join(" "),
         page.relatedPages.join(" "),
+        page.relations.map((relation) => `${relation.targetId} ${relation.type} ${relation.note || ""}`).join(" "),
       ]
         .join("\n")
         .toLowerCase()
@@ -141,6 +156,7 @@ export default function AdminPublishedPage() {
           rolesText: "",
           sourceIdsText: "",
           relatedPagesText: "",
+          relationsText: "",
           content: "",
         }),
         ...patch,
@@ -165,6 +181,7 @@ export default function AdminPublishedPage() {
           roles: splitText(editor.rolesText, /[、,，/]/u),
           sourceIds: splitText(editor.sourceIdsText, /[,\s，/]+/u),
           relatedPages: splitText(editor.relatedPagesText, /[\n,，]+/u),
+          relations: resolvePageRelations(editor),
           content: editor.content,
         }),
       });
@@ -369,6 +386,18 @@ export default function AdminPublishedPage() {
                               }}
                             />
                           </div>
+                          <textarea
+                            value={editor.relationsText}
+                            onChange={(event) => updatePageEditor(page.id, { relationsText: event.target.value })}
+                            rows={3}
+                            placeholder={"页面关系，一行一条：targetId | type | note\n例如：roles/helper | depends_on | 执行前先看"}
+                            className="rounded-[18px] border px-4 py-3 text-sm leading-7 outline-none"
+                            style={{
+                              borderColor: "var(--surface-outline-strong)",
+                              background: "var(--surface-command)",
+                              color: "var(--color-sidebar-text-bright)",
+                            }}
+                          />
                           <textarea
                             value={editor.content}
                             onChange={(event) => updatePageEditor(page.id, { content: event.target.value })}

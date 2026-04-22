@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { buildSeeAlsoRelations } from "../../lib/wiki-relations";
 import {
   ensureWikiWorkspace,
   findWikiDraftByPageId,
@@ -10,6 +11,7 @@ import {
   upsertWikiSourceRecordByTitle,
 } from "../../lib/server/wiki-store";
 import type { WikiCategory, WikiDraftStatus } from "../../lib/wiki-types";
+import type { WikiRelation } from "../../lib/wiki-types";
 
 const execFileAsync = promisify(execFile);
 
@@ -61,6 +63,7 @@ type PendingDraft = {
   summary: string;
   sourceIds: string[];
   relatedPages: string[];
+  relations: WikiRelation[];
   roles: string[];
   content: string;
 };
@@ -690,6 +693,7 @@ async function buildPendingChanges() {
       summary: definition.summary,
       sourceIds: definition.sourceIds,
       relatedPages,
+      relations: buildSeeAlsoRelations(relatedPages),
       roles,
       content,
     });
@@ -751,6 +755,7 @@ async function applyPendingChanges(pendingSources: PendingSource[], pendingDraft
       roles: draft.roles,
       sourceIds: draft.sourceIds,
       relatedPages: draft.relatedPages,
+      relations: draft.relations,
       content: draft.content,
       status: deriveDraftStatus(),
       notes: `批量导入自《${getDocumentConfig(draft.sourceKey).title}》`,

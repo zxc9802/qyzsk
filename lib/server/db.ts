@@ -81,6 +81,21 @@ async function runSchemaSetup(client: PoolClient) {
     CREATE INDEX IF NOT EXISTS kb_chat_report_cache_user_updated_idx
     ON kb_chat_report_cache (user_id, updated_at_ms DESC)
   `);
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS kb_chat_conversation_context_state (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      state_json JSONB NOT NULL,
+      updated_at_ms BIGINT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id)
+    )
+  `);
+
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS kb_chat_conversation_context_state_user_updated_idx
+    ON kb_chat_conversation_context_state (user_id, updated_at_ms DESC)
+  `);
 }
 
 export async function ensureKbChatSchema() {

@@ -1,8 +1,10 @@
+import { deriveRelatedPageIds, normalizeWikiRelations } from "@/lib/wiki-relations";
 import type { WikiDraft, WikiSourceRecord } from "@/lib/wiki-types";
 import { buildApprovedPageFromDraft } from "@/lib/server/wiki-drafts";
 import {
   appendWikiLog,
   isWikiCategory,
+  readWikiSourceRecord,
   readPublishedPage,
   readWikiDraft,
   updateWikiDraft,
@@ -18,6 +20,7 @@ export type WikiDraftUpdatePayload = {
   summary?: string;
   roles?: unknown;
   relatedPages?: unknown;
+  relations?: unknown;
   sourceIds?: unknown;
   content?: string;
   notes?: string;
@@ -28,13 +31,20 @@ function normalizeStringList(value: unknown) {
 }
 
 function applyDraftPatch(draft: WikiDraft, action: WikiDraftAction, body: WikiDraftUpdatePayload): WikiDraft {
+  const normalizedRelations = normalizeWikiRelations(body.relations);
+  const normalizedRelatedPages = normalizeStringList(body.relatedPages);
+
   return {
     ...draft,
     title: typeof body.title === "string" ? body.title.trim() || draft.title : draft.title,
     category: isWikiCategory(body.category) ? body.category : draft.category,
     summary: typeof body.summary === "string" ? body.summary.trim() || draft.summary : draft.summary,
     roles: normalizeStringList(body.roles) || draft.roles,
-    relatedPages: normalizeStringList(body.relatedPages) || draft.relatedPages,
+    relations: normalizedRelations.length > 0 ? normalizedRelations : draft.relations,
+    relatedPages:
+      normalizedRelations.length > 0
+        ? deriveRelatedPageIds(normalizedRelations, normalizedRelatedPages || draft.relatedPages)
+        : normalizedRelatedPages || draft.relatedPages,
     sourceIds: normalizeStringList(body.sourceIds) || draft.sourceIds,
     content: typeof body.content === "string" ? body.content.trim() || draft.content : draft.content,
     notes: typeof body.notes === "string" ? body.notes.trim() : draft.notes,
@@ -47,7 +57,22 @@ function applyDraftPatch(draft: WikiDraft, action: WikiDraftAction, body: WikiDr
   };
 }
 
-async function markSourceStatus(sourceId: string, status: WikiSourceRecord["status"]) {
+async function syncSourceStatusFromDrafts(sourceId: string) {
+  const source = await readWikiSourceRecord(sourceId);
+  if (!source) {
+    throw new Error("Wiki source not found");
+  }
+
+  const drafts = (
+    await Promise.all(source.draftIds.map((draftId) => readWikiDraft(draftId)))
+  ).filter((draft): draft is WikiDraft => Boolean(draft));
+
+  const status: WikiSourceRecord["status"] = drafts.some((draft) => draft.status === "draft")
+    ? "drafted"
+    : drafts.some((draft) => draft.status === "approved")
+      ? "approved"
+      : "rejected";
+
   await updateWikiSourceRecord(sourceId, (current) => ({
     ...current,
     status,
@@ -78,10 +103,10 @@ export async function applyWikiDraftAction(
         }
       : basePage;
     await writePublishedPage(page);
-    await markSourceStatus(nextDraft.sourceId, "approved");
+    await syncSourceStatusFromDrafts(nextDraft.sourceId);
     await appendWikiLog(`approve | ${page.id}\n- 来源草稿：${nextDraft.id}`);
   } else if (action === "reject") {
-    await markSourceStatus(nextDraft.sourceId, "rejected");
+    await syncSourceStatusFromDrafts(nextDraft.sourceId);
     await appendWikiLog(`reject | ${nextDraft.id}\n- 标题：${nextDraft.title}`);
   }
 

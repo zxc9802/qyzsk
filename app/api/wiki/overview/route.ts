@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
             roles: page.roles,
             sourceIds: page.sourceIds,
             relatedPages: page.relatedPages,
+            relations: page.relations,
             createdAt: page.createdAt,
             updatedAt: page.updatedAt,
             version: page.version,

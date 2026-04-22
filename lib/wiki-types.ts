@@ -1,6 +1,32 @@
 export type WikiCategory = "concepts" | "entities" | "roles" | "faq" | "synthesis";
 export type WikiDraftStatus = "draft" | "approved" | "rejected";
 export type WikiSourceStatus = "drafted" | "approved" | "rejected";
+export type WikiRelationType =
+  | "prerequisite"
+  | "depends_on"
+  | "explains"
+  | "applies_to"
+  | "reinforces"
+  | "see_also"
+  | "example_of"
+  | "contradicts";
+
+export const WIKI_RELATION_TYPES: WikiRelationType[] = [
+  "prerequisite",
+  "depends_on",
+  "explains",
+  "applies_to",
+  "reinforces",
+  "see_also",
+  "example_of",
+  "contradicts",
+];
+
+export interface WikiRelation {
+  targetId: string;
+  type: WikiRelationType;
+  note?: string;
+}
 
 export interface WikiSubmitter {
   userId: string;
@@ -18,6 +44,7 @@ export interface WikiPage {
   roles: string[];
   sourceIds: string[];
   relatedPages: string[];
+  relations: WikiRelation[];
   createdAt: string;
   updatedAt: string;
   version: number;
@@ -31,6 +58,7 @@ export interface WikiPageSearchDocument extends WikiPage {
 export interface WikiDraft {
   id: string;
   sourceId: string;
+  targetPageId?: string;
   submittedBy?: WikiSubmitter;
   title: string;
   category: WikiCategory;
@@ -38,6 +66,7 @@ export interface WikiDraft {
   roles: string[];
   sourceIds: string[];
   relatedPages: string[];
+  relations: WikiRelation[];
   content: string;
   proposedSlug: string;
   status: WikiDraftStatus;

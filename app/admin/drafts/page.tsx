@@ -69,6 +69,7 @@ export default function AdminDraftsPage() {
     return sortedDrafts.filter((draft) =>
       [
         draft.id,
+        draft.targetPageId,
         draft.title,
         draft.summary,
         draft.content,
@@ -76,6 +77,7 @@ export default function AdminDraftsPage() {
         draft.notes,
         draft.submittedBy?.nickname,
         draft.submittedBy?.account,
+        draft.relations.map((relation) => `${relation.targetId} ${relation.type} ${relation.note || ""}`).join(" "),
       ]
         .filter(Boolean)
         .join("\n")
@@ -214,6 +216,7 @@ export default function AdminDraftsPage() {
                       </div>
                       <div className="mt-2 space-y-1 text-sm" style={{ color: "var(--color-ink-muted)" }}>
                         <div>来源：{draft.sourceId} · 更新时间：{formatDate(draft.updatedAt)}</div>
+                        <div>{draft.targetPageId ? `更新目标：${draft.targetPageId}` : "提案类型：新增页面"}</div>
                         <div>提交人：{formatSubmitterLabel(draft.submittedBy)}</div>
                       </div>
                     </div>
@@ -303,6 +306,18 @@ export default function AdminDraftsPage() {
                         }}
                       />
                     </div>
+                    <textarea
+                      value={editor.relationsText}
+                      onChange={(event) => updateDraftEditor(draft.id, { relationsText: event.target.value })}
+                      rows={3}
+                      placeholder={"页面关系，一行一条：targetId | type | note\n例如：roles/helper | depends_on | 执行前先看"}
+                      className="rounded-[18px] border px-4 py-3 text-sm leading-7 outline-none"
+                      style={{
+                        borderColor: "var(--surface-outline-strong)",
+                        background: "var(--surface-command)",
+                        color: "var(--color-sidebar-text-bright)",
+                      }}
+                    />
                     <textarea
                       value={editor.content}
                       onChange={(event) => updateDraftEditor(draft.id, { content: event.target.value })}

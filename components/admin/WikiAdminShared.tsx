@@ -3,6 +3,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { CHAT_MODELS, DEFAULT_WIKI_DRAFT_MODEL_ID, type ChatModelId } from "@/lib/chat-models";
 import { extractApiErrorMessage, readJsonSafely, redirectToMainAppIfNeeded } from "@/lib/client/api-response";
+import { buildSeeAlsoRelations, formatWikiRelationsText, parseWikiRelationsText } from "@/lib/wiki-relations";
 import type { WikiCategory, WikiDraft, WikiPage, WikiSourceRecord, WikiStats } from "@/lib/wiki-types";
 
 export type OverviewPayload = {
@@ -19,6 +20,7 @@ export type DraftEditorState = {
   rolesText: string;
   sourceIdsText: string;
   relatedPagesText: string;
+  relationsText: string;
   content: string;
   notes: string;
 };
@@ -47,6 +49,9 @@ export function buildDraftEditorState(draft: WikiDraft): DraftEditorState {
     rolesText: draft.roles.join("、"),
     sourceIdsText: draft.sourceIds.join(", "),
     relatedPagesText: draft.relatedPages.join("\n"),
+    relationsText: formatWikiRelationsText(
+      draft.relations.length > 0 ? draft.relations : buildSeeAlsoRelations(draft.relatedPages)
+    ),
     content: draft.content,
     notes: draft.notes || "",
   };
@@ -57,6 +62,15 @@ export function splitText(value: string, separators: RegExp) {
     .split(separators)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function resolveEditorRelations(editor: Pick<DraftEditorState, "relationsText" | "relatedPagesText">) {
+  const typedRelations = parseWikiRelationsText(editor.relationsText);
+  if (typedRelations.length > 0) {
+    return typedRelations;
+  }
+
+  return buildSeeAlsoRelations(splitText(editor.relatedPagesText, /[\n,，]+/u));
 }
 
 export function useWikiAdminOverview() {
@@ -185,6 +199,7 @@ export function useWikiAdminOverview() {
           roles: splitText(editor.rolesText, /[、,，/]/u),
           sourceIds: splitText(editor.sourceIdsText, /[,\s，/]+/u),
           relatedPages: splitText(editor.relatedPagesText, /[\n,，]+/u),
+          relations: resolveEditorRelations(editor),
           content: editor.content,
           notes: editor.notes,
         }),
@@ -223,6 +238,7 @@ export function useWikiAdminOverview() {
               roles: splitText(editor.rolesText, /[、,，/]/u),
               sourceIds: splitText(editor.sourceIdsText, /[,\s，/]+/u),
               relatedPages: splitText(editor.relatedPagesText, /[\n,，]+/u),
+              relations: resolveEditorRelations(editor),
               content: editor.content,
               notes: editor.notes,
             };
@@ -249,10 +265,12 @@ export function useWikiAdminOverview() {
           brokenLinkCount: number;
           isolatedPageCount: number;
           stalePageCount: number;
+          oneWayRelationCount?: number;
         };
         brokenLinks: string[];
         isolatedPages: string[];
         stalePages: string[];
+        oneWayRelations?: string[];
       }>("/api/wiki/lint", {
         method: "POST",
       });
@@ -266,6 +284,10 @@ export function useWikiAdminOverview() {
           payload.isolatedPages.length > 0 ? `孤立页面详情：${payload.isolatedPages.join("、")}` : "孤立页面详情：无",
           `疑似过期页面：${payload.stats.stalePageCount}`,
           payload.stalePages.length > 0 ? `过期页面详情：${payload.stalePages.join("、")}` : "过期页面详情：无",
+          `单向关系：${payload.stats.oneWayRelationCount || 0}`,
+          payload.oneWayRelations && payload.oneWayRelations.length > 0
+            ? `单向关系详情：${payload.oneWayRelations.join("；")}`
+            : "单向关系详情：无",
         ].join("\n")
       );
     } catch (requestError) {
