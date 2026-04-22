@@ -1,5 +1,10 @@
 import { promises as fs } from "fs";
 import path from "path";
+import {
+  buildSeeAlsoRelations,
+  deriveRelatedPageIds,
+  normalizeWikiRelations,
+} from "@/lib/wiki-relations";
 import type {
   WikiCategory,
   WikiDraft,
@@ -10,6 +15,7 @@ import type {
   WikiStats,
   WikiSubmitter,
 } from "@/lib/wiki-types";
+import { syncPublishedWikiPageToRag } from "@/lib/server/rag-indexer";
 
 const PUBLISHED_ROOT = path.join(process.cwd(), "wiki");
 const WORKSPACE_ROOT = path.join(process.cwd(), ".kb-chat-data", "wiki");
@@ -39,6 +45,7 @@ const DEFAULT_SCHEMA = `# Wiki Schema
 ## 内容规范
 
 - 每个页面必须有 title、summary、sourceIds、relatedPages。
+- relations 用来说明页面之间“为什么相关”，正式页面优先维护 typed relations。
 - 优先写“结论 + 判断依据 + 下一步动作”，避免泛泛概述。
 - 新页面应尽量引用已有页面，而不是重复同一段知识。
 - 正式 Wiki 只发布审核通过的页面。
@@ -107,10 +114,24 @@ function normalizeWikiSourceRecord(record: WikiSourceRecord): WikiSourceRecord {
   };
 }
 
+function normalizePageId(pageId: string) {
+  return pageId.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+}
+
 function normalizeWikiDraftRecord(draft: WikiDraft): WikiDraft {
+  const relations = normalizeWikiRelations((draft as Partial<WikiDraft>).relations);
+  const relatedPages = deriveRelatedPageIds(
+    relations.length > 0 ? relations : buildSeeAlsoRelations(draft.relatedPages || []),
+    draft.relatedPages || []
+  );
+  const targetPageId = typeof draft.targetPageId === "string" ? normalizePageId(draft.targetPageId) : "";
+
   return {
     ...draft,
     submittedBy: normalizeSubmitter(draft.submittedBy),
+    ...(targetPageId ? { targetPageId } : {}),
+    relatedPages,
+    relations: relations.length > 0 ? relations : buildSeeAlsoRelations(relatedPages),
   };
 }
 
@@ -142,6 +163,7 @@ async function readJson<T>(filePath: string, fallback: T): Promise<T> {
 }
 
 function serializeFrontmatter(page: Omit<WikiPage, "content">): string {
+  const relatedPages = deriveRelatedPageIds(page.relations, page.relatedPages);
   return [
     "---",
     `id: ${JSON.stringify(page.id)}`,
@@ -150,7 +172,8 @@ function serializeFrontmatter(page: Omit<WikiPage, "content">): string {
     `summary: ${JSON.stringify(page.summary)}`,
     `roles: ${JSON.stringify(page.roles)}`,
     `source_ids: ${JSON.stringify(page.sourceIds)}`,
-    `related_pages: ${JSON.stringify(page.relatedPages)}`,
+    `related_pages: ${JSON.stringify(relatedPages)}`,
+    `relations: ${JSON.stringify(page.relations)}`,
     `created_at: ${JSON.stringify(page.createdAt)}`,
     `updated_at: ${JSON.stringify(page.updatedAt)}`,
     `version: ${page.version}`,
@@ -199,6 +222,13 @@ function parseMarkdownPage(raw: string, filePath: string): WikiPageSearchDocumen
   const category = frontmatter.category;
   if (!isWikiCategory(category)) return null;
 
+  const fallbackRelatedPages = Array.isArray(frontmatter.related_pages)
+    ? frontmatter.related_pages.map(String).map((item) => item.trim()).filter(Boolean)
+    : [];
+  const typedRelations = normalizeWikiRelations(frontmatter.relations);
+  const relations = typedRelations.length > 0 ? typedRelations : buildSeeAlsoRelations(fallbackRelatedPages);
+  const relatedPages = deriveRelatedPageIds(relations, fallbackRelatedPages);
+
   return {
     id: String(frontmatter.id || ""),
     title: String(frontmatter.title || ""),
@@ -206,7 +236,8 @@ function parseMarkdownPage(raw: string, filePath: string): WikiPageSearchDocumen
     summary: String(frontmatter.summary || ""),
     roles: Array.isArray(frontmatter.roles) ? frontmatter.roles.map(String) : [],
     sourceIds: Array.isArray(frontmatter.source_ids) ? frontmatter.source_ids.map(String) : [],
-    relatedPages: Array.isArray(frontmatter.related_pages) ? frontmatter.related_pages.map(String) : [],
+    relatedPages,
+    relations,
     createdAt: String(frontmatter.created_at || ""),
     updatedAt: String(frontmatter.updated_at || ""),
     version: typeof frontmatter.version === "number" ? frontmatter.version : 1,
@@ -217,6 +248,23 @@ function parseMarkdownPage(raw: string, filePath: string): WikiPageSearchDocumen
 
 function buildMarkdownPage(page: WikiPage): string {
   return `${serializeFrontmatter(page)}\n\n${page.content.trim()}\n`;
+}
+
+function normalizePublishedSearchDocument(
+  page: Omit<WikiPageSearchDocument, "relations" | "relatedPages"> &
+    Partial<Pick<WikiPageSearchDocument, "relations" | "relatedPages">>
+): WikiPageSearchDocument {
+  const relations = normalizeWikiRelations(page.relations);
+  const relatedPages = deriveRelatedPageIds(
+    relations.length > 0 ? relations : buildSeeAlsoRelations(page.relatedPages || []),
+    page.relatedPages || []
+  );
+
+  return {
+    ...page,
+    relations: relations.length > 0 ? relations : buildSeeAlsoRelations(relatedPages),
+    relatedPages,
+  };
 }
 
 function buildIndexMarkdown(pages: WikiPage[]): string {
@@ -347,14 +395,19 @@ export async function listPublishedPages(): Promise<WikiPageSearchDocument[]> {
   if (cachedMeta?.fingerprint === fingerprint) {
     const cachedPages = await readJson<WikiPageSearchDocument[] | null>(INDEX_CACHE_PATH, null);
     if (cachedPages) {
-      return cachedPages;
+      const normalizedCachedPages = cachedPages.map((page) => normalizePublishedSearchDocument(page));
+      await writeJson(INDEX_CACHE_PATH, normalizedCachedPages);
+      return normalizedCachedPages;
     }
   }
 
   const pages = await readPublishedPagesUncached();
-  await writeJson(INDEX_CACHE_PATH, pages);
+  await writeJson(
+    INDEX_CACHE_PATH,
+    pages.map((page) => normalizePublishedSearchDocument(page))
+  );
   await writeJson(INDEX_META_PATH, { fingerprint });
-  return pages;
+  return pages.map((page) => normalizePublishedSearchDocument(page));
 }
 
 export async function listPublishedWikiIds(): Promise<string[]> {
@@ -412,18 +465,28 @@ export async function writePublishedPage(page: WikiPage) {
   await ensureWikiWorkspace();
   const filePath = publishedFilePath(page.id);
   await ensureDir(path.dirname(filePath));
-  await fs.writeFile(filePath, buildMarkdownPage(page), "utf8");
+  const normalizedPage: WikiPage = {
+    ...page,
+    relations: normalizeWikiRelations(page.relations),
+    relatedPages: deriveRelatedPageIds(normalizeWikiRelations(page.relations), page.relatedPages),
+  };
+  await fs.writeFile(filePath, buildMarkdownPage(normalizedPage), "utf8");
   await appendWikiLog(`publish | ${page.id}\n- 标题：${page.title}\n- 版本：${page.version}`);
   const pages = await listPublishedPages();
   const mergedPages = pages
     .filter((item) => item.id !== page.id)
-    .concat({
-      ...page,
-      filePath,
-    });
+    .concat(
+      normalizePublishedSearchDocument({
+        ...normalizedPage,
+        filePath,
+      })
+    );
   await writeJson(INDEX_CACHE_PATH, mergedPages);
   await writeJson(INDEX_META_PATH, { fingerprint: await computePublishedFingerprint() });
   await fs.writeFile(WIKI_INDEX_PATH, buildIndexMarkdown(mergedPages), "utf8");
+  await syncPublishedWikiPageToRag(page).catch((error) => {
+    console.error("Published wiki page RAG sync failed:", page.id, error);
+  });
 }
 
 export async function appendWikiLog(entry: string) {
@@ -544,13 +607,16 @@ export async function upsertWikiSourceRecordByTitle(input: {
 
 export async function createWikiDraft(input: Omit<WikiDraft, "id" | "createdAt" | "updatedAt">) {
   await ensureWikiWorkspace();
-  const draft: WikiDraft = {
+  const relations = normalizeWikiRelations(input.relations);
+  const draft: WikiDraft = normalizeWikiDraftRecord({
     ...input,
     submittedBy: normalizeSubmitter(input.submittedBy),
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
     createdAt: nowIso(),
     updatedAt: nowIso(),
-  };
+    relations,
+    relatedPages: deriveRelatedPageIds(relations, input.relatedPages),
+  } as WikiDraft);
   await writeJson(draftPath(draft.id), draft);
   await updateWikiSourceRecord(draft.sourceId, (current) => ({
     ...current,
@@ -564,16 +630,19 @@ export async function readWikiDraft(draftId: string): Promise<WikiDraft | null> 
   return draft ? normalizeWikiDraftRecord(draft) : null;
 }
 
-function normalizePageId(pageId: string) {
-  return pageId.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-}
-
-function resolveDraftPageIds(draft: Pick<WikiDraft, "category" | "title" | "proposedSlug">) {
+function resolveDraftPageIds(draft: Pick<WikiDraft, "category" | "title" | "proposedSlug" | "targetPageId">) {
   const ids = new Set<string>();
   ids.add(normalizePageId(generateWikiId(draft.category, draft.title)));
 
   if (draft.proposedSlug.trim()) {
     ids.add(normalizePageId(`${draft.category}/${draft.proposedSlug}`));
+  }
+
+  const targetPageId = "targetPageId" in draft && typeof draft.targetPageId === "string"
+    ? draft.targetPageId.trim()
+    : "";
+  if (targetPageId) {
+    ids.add(normalizePageId(targetPageId));
   }
 
   return ids;
@@ -629,8 +698,9 @@ export async function updateWikiDraft(
     ...current,
     updatedAt: nowIso(),
   });
-  await writeJson(draftPath(draftId), next);
-  return next;
+  const normalizedNext = normalizeWikiDraftRecord(next);
+  await writeJson(draftPath(draftId), normalizedNext);
+  return normalizedNext;
 }
 
 export async function upsertWikiDraftByPageId(
@@ -644,6 +714,7 @@ export async function upsertWikiDraftByPageId(
   if (!existing) {
     return createWikiDraft({
       ...input,
+      targetPageId: input.targetPageId || normalizedPageId,
       proposedSlug,
     });
   }
@@ -651,6 +722,7 @@ export async function upsertWikiDraftByPageId(
   return updateWikiDraft(existing.id, (current) => ({
     ...current,
     ...input,
+    targetPageId: input.targetPageId || normalizedPageId,
     proposedSlug,
     status: input.status,
   }));

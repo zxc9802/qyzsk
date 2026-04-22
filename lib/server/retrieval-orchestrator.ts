@@ -9,11 +9,16 @@ import {
   type KnowledgeBaseEntry,
 } from "@/lib/server/kb-retrieval";
 import { buildConversationFileRetrieval } from "@/lib/server/file-retrieval";
+import { searchCanonicalWikiPagesByVector } from "@/lib/server/rag-retrieval";
 import { searchWikiPages } from "@/lib/server/wiki-search";
+import { listPublishedPages } from "@/lib/server/wiki-store";
+import { getWikiRelationTypeLabel } from "@/lib/wiki-relations";
+import type { WikiRelation, WikiRelationType } from "@/lib/wiki-types";
 
 const MAX_TOTAL_KNOWLEDGE_CHARS = 12000;
 const MAX_WIKI_CONTEXT_CHARS = 7600;
 const MAX_WIKI_PAGES = 4;
+const MAX_WIKI_RELATION_SUMMARIES = 3;
 const MAX_KB_BACKFILL_ENTRIES = 3;
 const WIKI_SCORE_THRESHOLD = 16;
 const CONTEXT_DEPENDENT_HINTS = [
@@ -113,6 +118,133 @@ function buildWikiContext(pages: WikiPageSearchDocument[]) {
   ].join("\n");
 }
 
+function getRelationPriority(type: WikiRelationType) {
+  switch (type) {
+    case "depends_on":
+      return 1;
+    case "prerequisite":
+      return 2;
+    case "explains":
+      return 3;
+    case "applies_to":
+      return 4;
+    case "reinforces":
+      return 5;
+    case "example_of":
+      return 6;
+    case "contradicts":
+      return 7;
+    case "see_also":
+    default:
+      return 8;
+  }
+}
+
+function selectRelatedWikiSummaries(options: {
+  selectedPages: WikiPageSearchDocument[];
+  allPages: WikiPageSearchDocument[];
+}) {
+  const pageById = new Map(options.allPages.map((page) => [page.id, page]));
+  const selectedIds = new Set(options.selectedPages.map((page) => page.id));
+  const candidates: Array<{
+    sourcePage: WikiPageSearchDocument;
+    relation: WikiRelation;
+    targetPage: WikiPageSearchDocument;
+  }> = [];
+  const seenTargets = new Set<string>();
+
+  const orderedRelations = options.selectedPages.flatMap((page) =>
+    (page.relations || [])
+      .slice()
+      .sort((left, right) => getRelationPriority(left.type) - getRelationPriority(right.type))
+      .map((relation) => ({ page, relation }))
+  );
+
+  for (const { page, relation } of orderedRelations) {
+    if (seenTargets.has(relation.targetId) || selectedIds.has(relation.targetId)) {
+      continue;
+    }
+
+    const targetPage = pageById.get(relation.targetId);
+    if (!targetPage) continue;
+
+    seenTargets.add(relation.targetId);
+    candidates.push({
+      sourcePage: page,
+      relation,
+      targetPage,
+    });
+
+    if (candidates.length >= MAX_WIKI_RELATION_SUMMARIES) {
+      break;
+    }
+  }
+
+  return candidates;
+}
+
+function buildRelatedWikiContext(
+  relations: Array<{
+    sourcePage: WikiPageSearchDocument;
+    relation: WikiRelation;
+    targetPage: WikiPageSearchDocument;
+  }>
+) {
+  if (relations.length === 0) return "";
+
+  return [
+    "以下是根据页面关系补充的轻量导航信息，只用于帮助串联知识，不代表需要展开阅读整页：",
+    "",
+    relations
+      .map(({ sourcePage, relation, targetPage }) =>
+        [
+          `关系补充：${targetPage.title} (${targetPage.id})`,
+          `来自页面：${sourcePage.title}`,
+          `关系类型：${getWikiRelationTypeLabel(relation.type)}`,
+          relation.note ? `关系说明：${relation.note}` : "",
+          `摘要：${targetPage.summary || "暂无摘要"}`,
+        ]
+          .filter(Boolean)
+          .join("\n")
+      )
+      .join("\n\n---\n\n"),
+  ].join("\n");
+}
+
+function mergeWikiSearchResults(
+  keywordResults: Awaited<ReturnType<typeof searchWikiPages>>,
+  vectorResults: Awaited<ReturnType<typeof searchCanonicalWikiPagesByVector>>
+) {
+  const merged = new Map<
+    string,
+    {
+      page: WikiPageSearchDocument;
+      score: number;
+      excerpt: string;
+    }
+  >();
+
+  keywordResults.forEach((item) => {
+    merged.set(item.page.id, item);
+  });
+
+  vectorResults.forEach((item) => {
+    const current = merged.get(item.page.id);
+    if (!current) {
+      merged.set(item.page.id, item);
+      return;
+    }
+
+    merged.set(item.page.id, {
+      ...current,
+      score: Math.max(current.score, item.score) + 4,
+      excerpt: current.excerpt || item.excerpt,
+    });
+  });
+
+  return Array.from(merged.values()).sort((left, right) => right.score - left.score);
+}
+
 function selectWikiPages(pages: Awaited<ReturnType<typeof searchWikiPages>>) {
   const selected: WikiPageSearchDocument[] = [];
   let budget = MAX_WIKI_CONTEXT_CHARS;
@@ -175,7 +307,7 @@ export async function buildRetrievalOrchestratorResult(options: {
     diagnosis: options.diagnosis,
   });
   const shouldUseWiki = options.knowledgeMode === "wiki_first";
-  const wikiSearchResults = shouldUseWiki
+  const keywordWikiSearchResults = shouldUseWiki
     ? await searchWikiPages({
         query: retrievalQuery,
         role: options.role,
@@ -183,8 +315,31 @@ export async function buildRetrievalOrchestratorResult(options: {
         topK: 6,
       })
     : [];
+  const keywordSelectedWikiPages = selectWikiPages(keywordWikiSearchResults);
+  const vectorWikiSearchResults =
+    shouldUseWiki && keywordSelectedWikiPages.length < 2
+      ? await searchCanonicalWikiPagesByVector({
+          query: retrievalQuery,
+          topK: 4,
+        }).catch((error) => {
+          console.error("Wiki vector retrieval error:", error);
+          return [];
+        })
+      : [];
+  const wikiSearchResults = mergeWikiSearchResults(keywordWikiSearchResults, vectorWikiSearchResults);
   const selectedWikiPages = selectWikiPages(wikiSearchResults);
-  const wikiContext = selectedWikiPages.length > 0 ? buildWikiContext(selectedWikiPages) : "";
+  const allPublishedPages = selectedWikiPages.length > 0 ? await listPublishedPages() : [];
+  const relationSummaries =
+    selectedWikiPages.length > 0
+      ? selectRelatedWikiSummaries({
+          selectedPages: selectedWikiPages,
+          allPages: allPublishedPages,
+        })
+      : [];
+  const wikiContext =
+    selectedWikiPages.length > 0
+      ? [buildWikiContext(selectedWikiPages), buildRelatedWikiContext(relationSummaries)].filter(Boolean).join("\n\n")
+      : "";
 
   const kbEntries =
     shouldUseWiki && selectedWikiPages.length > 0

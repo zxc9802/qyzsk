@@ -67,6 +67,11 @@ function scorePage(page: WikiPageSearchDocument, terms: string[], role: string):
   const content = normalize(page.content);
   const roles = page.roles.map(normalize);
   const related = page.relatedPages.map(normalize);
+  const relations = page.relations || [];
+  const relationTargets = relations.map((relation) => normalize(relation.targetId));
+  const relationNotes = relations
+    .map((relation) => normalize(relation.note || ""))
+    .filter(Boolean);
 
   let score = 0;
 
@@ -78,6 +83,8 @@ function scorePage(page: WikiPageSearchDocument, terms: string[], role: string):
     if (summary.includes(normalizedTerm)) score += 18;
     if (content.includes(normalizedTerm)) score += normalizedTerm.length >= 4 ? 10 : 4;
     if (related.some((item) => item.includes(normalizedTerm))) score += 6;
+    if (relationTargets.some((item) => item.includes(normalizedTerm))) score += 8;
+    if (relationNotes.some((item) => item.includes(normalizedTerm))) score += 4;
     if (roles.some((item) => item.includes(normalizedTerm))) score += 8;
   }
 

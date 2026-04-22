@@ -12,6 +12,7 @@ type BulkApproveItem = {
   roles?: string[];
   sourceIds?: string[];
   relatedPages?: string[];
+  relations?: unknown;
   content?: string;
   notes?: string;
 };

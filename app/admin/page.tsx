@@ -67,6 +67,7 @@ function formatSourceStatusLabel(status: WikiSourceRecord["status"]) {
 function buildDraftSearchText(draft: WikiDraft) {
   return [
     draft.id,
+    draft.targetPageId,
     draft.title,
     draft.summary,
     draft.content,

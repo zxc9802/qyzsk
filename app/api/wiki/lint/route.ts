@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
     const brokenLinks: string[] = [];
     const isolatedPages: string[] = [];
     const stalePages: string[] = [];
+    const oneWayRelations: string[] = [];
     const referencedBy = new Map<string, string[]>();
 
     pages.forEach((page) => referencedBy.set(page.id, []));
@@ -38,6 +39,18 @@ export async function POST(req: NextRequest) {
     }
 
     for (const page of pages) {
+      for (const relation of page.relations) {
+        const target = pages.find((candidate) => candidate.id === relation.targetId);
+        if (!target) continue;
+
+        const hasReverseRelation = target.relations.some((candidate) => candidate.targetId === page.id);
+        if (!hasReverseRelation) {
+          oneWayRelations.push(`${page.id} -[${relation.type}]-> ${relation.targetId}`);
+        }
+      }
+    }
+
+    for (const page of pages) {
       const inbound = referencedBy.get(page.id) || [];
       if (inbound.length === 0 && page.relatedPages.length === 0) {
         isolatedPages.push(page.id);
@@ -52,10 +65,12 @@ export async function POST(req: NextRequest) {
           brokenLinkCount: brokenLinks.length,
           isolatedPageCount: isolatedPages.length,
           stalePageCount: stalePages.length,
+          oneWayRelationCount: oneWayRelations.length,
         },
         brokenLinks,
         isolatedPages,
         stalePages,
+        oneWayRelations,
       }),
       {
         headers: { "Content-Type": "application/json" },

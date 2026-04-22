@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { deriveRelatedPageIds, normalizeWikiRelations } from "@/lib/wiki-relations";
 import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
 import { readPublishedPage, updatePublishedPage } from "@/lib/server/wiki-store";
 
@@ -8,6 +9,7 @@ type PageUpdatePayload = {
   roles?: unknown;
   sourceIds?: unknown;
   relatedPages?: unknown;
+  relations?: unknown;
   content?: string;
 };
 
@@ -40,13 +42,20 @@ export async function PATCH(
       });
     }
 
+    const normalizedRelations = normalizeWikiRelations(body.relations);
+    const normalizedRelatedPages = normalizeStringList(body.relatedPages);
+
     const updatedPage = await updatePublishedPage(resolvedPageId, (current) => ({
       ...current,
       title: typeof body.title === "string" ? body.title.trim() || current.title : current.title,
       summary: typeof body.summary === "string" ? body.summary.trim() || current.summary : current.summary,
       roles: normalizeStringList(body.roles) || current.roles,
       sourceIds: normalizeStringList(body.sourceIds) || current.sourceIds,
-      relatedPages: normalizeStringList(body.relatedPages) || current.relatedPages,
+      relations: normalizedRelations.length > 0 ? normalizedRelations : current.relations,
+      relatedPages:
+        normalizedRelations.length > 0
+          ? deriveRelatedPageIds(normalizedRelations, normalizedRelatedPages || current.relatedPages)
+          : normalizedRelatedPages || current.relatedPages,
       content: typeof body.content === "string" ? body.content.trim() || current.content : current.content,
     }));
 

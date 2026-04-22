@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import { appSessionErrorResponse, assertAppUserSession } from "@/lib/server/app-session";
-import { ingestWikiSource } from "@/lib/server/wiki-drafts";
-import { applyWikiDraftAction } from "@/lib/server/wiki-review";
+import { approveIngestedWikiSource, ingestWikiSource } from "@/lib/server/wiki-drafts";
 import { readWikiSourceRecord } from "@/lib/server/wiki-store";
 
 export const runtime = "nodejs";
@@ -30,7 +29,7 @@ export async function POST(req: NextRequest) {
     });
 
     if (isAdmin) {
-      const approvedDraft = await applyWikiDraftAction(result.draft.id, "approve", {});
+      const approvedDrafts = await approveIngestedWikiSource(result);
       const approvedSource = await readWikiSourceRecord(result.source.id);
 
       return new Response(
@@ -40,9 +39,11 @@ export async function POST(req: NextRequest) {
             ...result.source,
             status: "approved",
           },
-          draft: approvedDraft,
+          draft: approvedDrafts[0] || result.draft,
+          drafts: approvedDrafts,
+          approvedDrafts,
           autoApproved: true,
-          message: "管理员提交的知识已直接发布，无需进入审核队列。",
+          message: `管理员提交的知识已直接发布，共处理 ${approvedDrafts.length} 条页面提案。`,
         }),
         {
           headers: { "Content-Type": "application/json" },
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest) {
       JSON.stringify({
         ...result,
         autoApproved: false,
+        message: `已生成 ${result.drafts.length} 条待审核页面提案。`,
       }),
       {
         headers: { "Content-Type": "application/json" },

@@ -285,6 +285,9 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
                         <div className="mt-1 text-[11px]" style={{ color: "var(--color-ink-muted)" }}>
                           提交时间：{formatDate(draft.createdAt)} · 最近更新：{formatDate(draft.updatedAt)}
                         </div>
+                        <div className="mt-1 text-[11px]" style={{ color: "var(--color-ink-muted)" }}>
+                          {draft.targetPageId ? `更新目标：${draft.targetPageId}` : "提案类型：新增页面"}
+                        </div>
                       </div>
                       <div
                         className="rounded-full border px-3 py-1 text-[11px] font-medium"
