@@ -25,7 +25,7 @@ import type {
   RetrievalSourceHit,
   UserSettings,
 } from "@/lib/types";
-import { withDbClient } from "@/lib/server/db";
+import { isDatabaseConfigured, withDbClient } from "@/lib/server/db";
 import { STORAGE_ROOT } from "@/lib/server/file-store";
 
 const DEFAULT_CONVERSATION_TITLE = "新对话";
@@ -94,7 +94,7 @@ function normalizeId(value: unknown) {
 }
 
 function shouldUseLocalStateStore() {
-  return process.env.NODE_ENV !== "production" && !process.env.DATABASE_URL?.trim();
+  return !isDatabaseConfigured();
 }
 
 function sanitizeStorageSegment(value: string) {
