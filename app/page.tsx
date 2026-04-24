@@ -13,6 +13,8 @@ import { extractApiErrorMessage, readJsonSafely, redirectToMainAppIfNeeded } fro
 import {
   createConversation, addMessage, updateLastAssistantMessage, deleteConversation,
   generateId,
+  getLegacyChatState,
+  mergeConversationsByUpdatedAt,
 } from "@/lib/storage";
 import Sidebar from "@/components/Sidebar";
 import ChatArea from "@/components/ChatArea";
@@ -102,6 +104,45 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
+    function applyChatState(state: ChatStatePayload) {
+      const settings = state.settings || null;
+      const loadedConversations = state.conversations || [];
+      const loadedActiveId = state.activeId && loadedConversations.some((conversation) => conversation.id === state.activeId)
+        ? state.activeId
+        : loadedConversations[0]?.id ?? null;
+
+      setConversations(loadedConversations);
+      setActiveId(loadedActiveId);
+      setConversationFiles({});
+      setUploadingByConversation({});
+      setUploadStatusByConversation({});
+      setStateReady(true);
+
+      if (settings) {
+        setRole(settings.role);
+        setRoleName(settings.roleName);
+        if (settings.chatModelId && isChatModelId(settings.chatModelId)) {
+          setSelectedModelId(settings.chatModelId);
+        }
+        if (settings.answerMode && isAnswerMode(settings.answerMode)) {
+          setSelectedAnswerMode(settings.answerMode);
+        }
+        setWebSearchEnabled(settings.webSearchEnabled === true);
+        if (settings.themeMode && isThemeMode(settings.themeMode)) {
+          setThemeMode(settings.themeMode);
+        }
+        setShowRoleModal(false);
+      } else {
+        setRole(null);
+        setRoleName("选择岗位");
+        setSelectedModelId(DEFAULT_CHAT_MODEL_ID);
+        setSelectedAnswerMode(DEFAULT_ANSWER_MODE);
+        setWebSearchEnabled(false);
+        setThemeMode(DEFAULT_THEME_MODE);
+        setShowRoleModal(true);
+      }
+    }
+
     async function bootstrapState() {
       try {
         const response = await fetch("/api/state", {
@@ -123,44 +164,52 @@ export default function Home() {
         const state = data?.data;
         const settings = state?.settings || null;
         const loadedConversations = state?.conversations || [];
+        const legacyState = getLegacyChatState();
+        const mergedConversations = legacyState
+          ? mergeConversationsByUpdatedAt(loadedConversations, legacyState.conversations)
+          : loadedConversations;
         const loadedActiveId = state?.activeId && loadedConversations.some((conversation) => conversation.id === state.activeId)
           ? state.activeId
           : loadedConversations[0]?.id ?? null;
+        const legacyActiveId =
+          legacyState?.activeId && mergedConversations.some((conversation) => conversation.id === legacyState.activeId)
+            ? legacyState.activeId
+            : null;
+        const mergedState: ChatStatePayload = {
+          conversations: mergedConversations,
+          activeId: legacyActiveId || loadedActiveId || mergedConversations[0]?.id || null,
+          settings: settings || legacyState?.settings || null,
+        };
+        const serverConversationsById = new Map(
+          loadedConversations.map((conversation) => [conversation.id, conversation])
+        );
+        const shouldPersistLegacyState = Boolean(
+          legacyState &&
+          (
+            mergedConversations.length !== loadedConversations.length ||
+            mergedConversations.some((conversation) => {
+              const serverConversation = serverConversationsById.get(conversation.id);
+              return !serverConversation || conversation.updatedAt > serverConversation.updatedAt;
+            }) ||
+            (!settings && legacyState.settings)
+          )
+        );
 
-        setConversations(loadedConversations);
-        setActiveId(loadedActiveId);
-        setConversationFiles({});
-        setUploadingByConversation({});
-        setUploadStatusByConversation({});
-        setStateReady(true);
+        applyChatState(mergedState);
 
-        if (settings) {
-          setRole(settings.role);
-          setRoleName(settings.roleName);
-          if (settings.chatModelId && isChatModelId(settings.chatModelId)) {
-            setSelectedModelId(settings.chatModelId);
-          }
-          if (settings.answerMode && isAnswerMode(settings.answerMode)) {
-            setSelectedAnswerMode(settings.answerMode);
-          }
-          setWebSearchEnabled(settings.webSearchEnabled === true);
-          if (settings.themeMode && isThemeMode(settings.themeMode)) {
-            setThemeMode(settings.themeMode);
-          }
-          setShowRoleModal(false);
-        } else {
-          setRole(null);
-          setRoleName("选择岗位");
-          setSelectedModelId(DEFAULT_CHAT_MODEL_ID);
-          setSelectedAnswerMode(DEFAULT_ANSWER_MODE);
-          setWebSearchEnabled(false);
-          setThemeMode(DEFAULT_THEME_MODE);
-          setShowRoleModal(true);
+        if (shouldPersistLegacyState) {
+          void persistState(mergedState);
         }
       } catch (error) {
         console.error("State bootstrap error:", error);
         if (!cancelled) {
-          setShowRoleModal(true);
+          const legacyState = getLegacyChatState();
+          if (legacyState) {
+            applyChatState(legacyState);
+            void persistState(legacyState);
+          } else {
+            setShowRoleModal(true);
+          }
         }
       } finally {
         if (!cancelled) {
@@ -174,7 +223,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [persistState]);
 
   useEffect(() => {
     if (!mounted || !stateReady) return;
