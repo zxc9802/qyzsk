@@ -9,7 +9,7 @@ import {
   type KnowledgeBaseEntry,
 } from "@/lib/server/kb-retrieval";
 import { buildConversationFileRetrieval } from "@/lib/server/file-retrieval";
-import { searchCanonicalWikiPagesByVector } from "@/lib/server/rag-retrieval";
+import { searchCanonicalWikiPagesByVector, searchKbEntriesByVector } from "@/lib/server/rag-retrieval";
 import { searchWikiPages } from "@/lib/server/wiki-search";
 import { listPublishedPages } from "@/lib/server/wiki-store";
 import { getWikiRelationTypeLabel } from "@/lib/wiki-relations";
@@ -20,7 +20,64 @@ const MAX_WIKI_CONTEXT_CHARS = 7600;
 const MAX_WIKI_PAGES = 4;
 const MAX_WIKI_RELATION_SUMMARIES = 3;
 const MAX_KB_BACKFILL_ENTRIES = 3;
+const MAX_KB_VECTOR_ENTRIES = 4;
+const MAX_KB_ENTRIES = 10;
+const MAX_VALUE_WIKI_PAGES = 1;
+const MAX_VALUE_KB_ENTRIES = 2;
 const WIKI_SCORE_THRESHOLD = 16;
+const VALUE_WIKI_PAGE_IDS = new Set([
+  "concepts/经营原则与高标准",
+  "roles/人才分级与用人原则",
+  "roles/新员工提问原则",
+  "roles/管理与复盘机制",
+]);
+const VALUE_KB_ENTRY_IDS = new Set([
+  "KB006",
+  "KB007",
+  "KB008",
+  "KB009",
+  "KB010",
+  "KB011",
+  "KB017",
+  "KB018",
+  "KB019",
+  "KB020",
+  "KB065",
+  "KB067",
+  "KB068",
+  "KB069",
+  "KB070",
+  "KB071",
+  "KB099",
+  "KB100",
+]);
+const VALUE_QUERY_RULES: Array<{ terms: string[]; values: string[] }> = [
+  {
+    terms: ["ai", "智能体", "提问", "问ai", "问 AI", "信息不足", "上下文", "不知道", "不会"],
+    values: ["补充业务上下文", "先问AI", "信息不足", "不编造", "先分类再回答"],
+  },
+  {
+    terms: ["错误", "复盘", "纠错", "问题", "失败", "优化", "改正"],
+    values: ["及时指出错误", "复盘纠错", "高标准", "避免复发"],
+  },
+  {
+    terms: ["项目", "优先级", "资源", "投入", "取舍", "决策", "推进"],
+    values: ["公司利益", "项目分级", "资源聚焦", "决策统一"],
+  },
+  {
+    terms: ["流程", "规则", "合规", "合同", "财务", "权限", "执行"],
+    values: ["效率优先", "不能忽略规则", "决策统一", "坚决执行"],
+  },
+  {
+    terms: ["复制", "沉淀", "sop", "SOP", "标准", "方法库", "放大", "规模"],
+    values: ["可复制", "可沉淀资产", "组织能力", "高利润"],
+  },
+  {
+    terms: ["员工", "人才", "招聘", "晋升", "培养", "带教", "负责人", "新项目", "强者"],
+    values: ["人才是核心资产", "S级人才", "强者打样", "筛选大于培养"],
+  },
+];
+const DEFAULT_VALUE_QUERY = "高标准 补充业务上下文 及时纠错 可复制 沉淀 结果负责";
 const CONTEXT_DEPENDENT_HINTS = [
   "这个",
   "那个",
@@ -292,6 +349,60 @@ function backfillKnowledgeBaseEntries(query: string, role: string, pages: WikiPa
   return uniqueKnowledgeBaseEntries([...sourceEntries, ...queryEntries]).slice(0, MAX_KB_BACKFILL_ENTRIES);
 }
 
+function buildValueRetrievalQuery(options: {
+  query: string;
+  role: string;
+  diagnosis?: QuestionDiagnosis;
+}) {
+  const haystack = normalizeQuery(
+    [
+      options.query,
+      options.role,
+      options.diagnosis?.categoryLabel || "",
+      options.diagnosis?.selectedScope || "",
+      ...(options.diagnosis?.missingSlots || []),
+      ...(options.diagnosis?.scopeOptions || []),
+    ].join(" ")
+  );
+  const values = new Set<string>();
+
+  for (const rule of VALUE_QUERY_RULES) {
+    if (rule.terms.some((term) => haystack.includes(normalizeQuery(term)))) {
+      rule.values.forEach((value) => values.add(value));
+    }
+  }
+
+  if (values.size === 0) {
+    DEFAULT_VALUE_QUERY.split(/\s+/).forEach((value) => values.add(value));
+  }
+
+  return Array.from(values).join(" ");
+}
+
+function isValueWikiPage(page: WikiPageSearchDocument) {
+  if (VALUE_WIKI_PAGE_IDS.has(page.id)) return true;
+
+  const joined = normalizeQuery([page.title, page.summary].join(" "));
+  return (
+    joined.includes("经营原则") ||
+    joined.includes("高标准") ||
+    joined.includes("人才分级") ||
+    joined.includes("新员工提问") ||
+    joined.includes("管理与复盘")
+  );
+}
+
+function isValueKnowledgeBaseEntry(entry: KnowledgeBaseEntry) {
+  return VALUE_KB_ENTRY_IDS.has(entry.id);
+}
+
+function selectValueKnowledgeBaseEntries(query: string, role: string, existingEntries: KnowledgeBaseEntry[]) {
+  const existingIds = new Set(existingEntries.map((entry) => entry.id));
+  return selectKnowledgeBaseEntriesByQuery(query, role)
+    .filter((entry) => isValueKnowledgeBaseEntry(entry) && !existingIds.has(entry.id))
+    .slice(0, MAX_VALUE_KB_ENTRIES);
+}
+
 export async function buildRetrievalOrchestratorResult(options: {
   query: string;
   role: string;
@@ -328,6 +439,25 @@ export async function buildRetrievalOrchestratorResult(options: {
       : [];
   const wikiSearchResults = mergeWikiSearchResults(keywordWikiSearchResults, vectorWikiSearchResults);
   const selectedWikiPages = selectWikiPages(wikiSearchResults);
+  const valueRetrievalQuery = buildValueRetrievalQuery({
+    query: retrievalQuery,
+    role: options.role,
+    diagnosis: options.diagnosis,
+  });
+  const selectedWikiIds = new Set(selectedWikiPages.map((page) => page.id));
+  const valueWikiSearchResults = shouldUseWiki
+    ? (
+        await searchWikiPages({
+          query: valueRetrievalQuery,
+          role: options.role,
+          diagnosis: options.diagnosis,
+          topK: 8,
+        })
+      )
+        .filter((item) => isValueWikiPage(item.page) && !selectedWikiIds.has(item.page.id))
+        .slice(0, MAX_VALUE_WIKI_PAGES)
+    : [];
+  const valueWikiPages = valueWikiSearchResults.map((item) => item.page);
   const allPublishedPages = selectedWikiPages.length > 0 ? await listPublishedPages() : [];
   const relationSummaries =
     selectedWikiPages.length > 0
@@ -337,14 +467,38 @@ export async function buildRetrievalOrchestratorResult(options: {
         })
       : [];
   const wikiContext =
-    selectedWikiPages.length > 0
-      ? [buildWikiContext(selectedWikiPages), buildRelatedWikiContext(relationSummaries)].filter(Boolean).join("\n\n")
+    selectedWikiPages.length > 0 || valueWikiPages.length > 0
+      ? [
+          selectedWikiPages.length > 0 ? buildWikiContext(selectedWikiPages) : "",
+          buildRelatedWikiContext(relationSummaries),
+          valueWikiPages.length > 0 ? buildWikiContext(valueWikiPages) : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n")
       : "";
 
-  const kbEntries =
+  const primaryKbEntries =
     shouldUseWiki && selectedWikiPages.length > 0
       ? backfillKnowledgeBaseEntries(retrievalQuery, options.role, selectedWikiPages)
       : selectKnowledgeBaseEntriesByQuery(retrievalQuery, options.role);
+  // 向量召回：用 triggerQuestion 向量索引补出口语化、字面不重合的 KB 条目。
+  // 未配置 RAG 时返回空数组，自动退化为纯关键词检索，保持原有行为。
+  const vectorKbEntries = (
+    await searchKbEntriesByVector({ query: retrievalQuery, topK: MAX_KB_VECTOR_ENTRIES }).catch((error) => {
+      console.error("KB vector retrieval error:", error);
+      return [];
+    })
+  ).map((item) => item.entry);
+  const valueKbEntries = selectValueKnowledgeBaseEntries(
+    valueRetrievalQuery,
+    options.role,
+    [...primaryKbEntries, ...vectorKbEntries]
+  );
+  const kbEntries = uniqueKnowledgeBaseEntries([
+    ...primaryKbEntries,
+    ...valueKbEntries,
+    ...vectorKbEntries,
+  ]).slice(0, MAX_KB_ENTRIES);
   const kbContext = buildKnowledgeBaseContextFromEntries(kbEntries);
   const kbHits: KnowledgeBaseHit[] = kbEntries.map(toKnowledgeBaseHit);
 
@@ -361,8 +515,11 @@ export async function buildRetrievalOrchestratorResult(options: {
   }
 
   const sourceHits = [
-    ...wikiSearchResults
-      .filter((item) => selectedWikiPages.some((page) => page.id === item.page.id))
+    ...[
+      ...wikiSearchResults.filter((item) => selectedWikiPages.some((page) => page.id === item.page.id)),
+      ...valueWikiSearchResults,
+    ]
+      .filter((item, index, items) => items.findIndex((candidate) => candidate.page.id === item.page.id) === index)
       .map((item) => toWikiSourceHit(item.page, item.score)),
     ...kbHits.map((hit) => ({
       id: hit.id,
@@ -380,6 +537,6 @@ export async function buildRetrievalOrchestratorResult(options: {
     fileContext: fileRetrieval.context,
     sourceHits,
     kbHits,
-    usedWiki: selectedWikiPages.length > 0,
+    usedWiki: selectedWikiPages.length > 0 || valueWikiPages.length > 0,
   };
 }

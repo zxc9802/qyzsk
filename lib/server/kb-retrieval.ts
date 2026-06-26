@@ -23,6 +23,9 @@ type QuerySignals = {
 const MAX_KB_CONTEXT_CHARS = 12000;
 const MIN_SELECTED_ENTRIES = 3;
 const MAX_SELECTED_ENTRIES = 6;
+const ABSOLUTE_MIN_SCORE = 20;
+const HAN_SEGMENT_PATTERN = /[\u4e00-\u9fff]{2,}/gu;
+const HAN_CHAR_PATTERN = /[\u4e00-\u9fff]/u;
 const STOP_TERMS = new Set([
   "什么",
   "怎么",
@@ -69,6 +72,7 @@ const ROLE_LABELS: Record<string, string[]> = {
 };
 
 let kbCache: KnowledgeBaseEntry[] | null = null;
+let kbDictionaryCache: string[] | null = null;
 
 export function getKnowledgeBaseEntries(): KnowledgeBaseEntry[] {
   if (kbCache) return kbCache;
@@ -76,7 +80,15 @@ export function getKnowledgeBaseEntries(): KnowledgeBaseEntry[] {
   const kbPath = path.join(process.cwd(), "lib", "kb-content.txt");
   const raw = fs.readFileSync(kbPath, "utf8");
   kbCache = parseKnowledgeBaseEntries(raw);
+  kbDictionaryCache = buildKnowledgeBaseDictionary(kbCache);
   return kbCache;
+}
+
+function getKnowledgeBaseDictionary(): string[] {
+  if (kbDictionaryCache) return kbDictionaryCache;
+
+  getKnowledgeBaseEntries();
+  return kbDictionaryCache || [];
 }
 
 function parseKnowledgeBaseEntries(raw: string): KnowledgeBaseEntry[] {
@@ -142,10 +154,97 @@ function splitValue(value?: string): string[] {
     .filter(Boolean);
 }
 
+function buildKnowledgeBaseDictionary(entries: KnowledgeBaseEntry[]): string[] {
+  const dictionary = new Set<string>();
+
+  for (const entry of entries) {
+    addMeaningfulTerms(dictionary, entry.title);
+    addMeaningfulTerms(dictionary, entry.category);
+    entry.relatedTerms.forEach((term) => addMeaningfulTerms(dictionary, term));
+    entry.triggerQuestions.forEach((question) => addMeaningfulTerms(dictionary, question));
+  }
+
+  return Array.from(dictionary).sort((left, right) => right.length - left.length || left.localeCompare(right));
+}
+
+function addMeaningfulTerms(target: Set<string>, value: string): void {
+  extractMeaningfulTerms(value).forEach((term) => target.add(term));
+}
+
+function extractMeaningfulTerms(value: string): string[] {
+  const normalizedValue = stripStopTerms(normalize(value));
+  const termSet = new Set<string>();
+
+  normalizedValue
+    .split(/[^\p{L}\p{N}\u4e00-\u9fff]+/u)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 2 && !STOP_TERMS.has(part))
+    .forEach((part) => {
+      if (HAN_CHAR_PATTERN.test(part)) {
+        collectHanTerms(part).forEach((term) => termSet.add(term));
+        return;
+      }
+
+      termSet.add(part);
+    });
+
+  return Array.from(termSet);
+}
+
+function collectHanTerms(value: string): string[] {
+  const termSet = new Set<string>();
+  const matches = value.match(HAN_SEGMENT_PATTERN) || [];
+
+  matches.forEach((part) => {
+    if (part.length <= 4 && !STOP_TERMS.has(part)) {
+      termSet.add(part);
+    }
+
+    const maxLength = Math.min(4, part.length);
+    for (let length = maxLength; length >= 2; length -= 1) {
+      for (let index = 0; index <= part.length - length; index += 1) {
+        const candidate = part.slice(index, index + length);
+        if (!STOP_TERMS.has(candidate)) {
+          termSet.add(candidate);
+        }
+      }
+    }
+  });
+
+  return Array.from(termSet);
+}
+
+function stripStopTerms(value: string): string {
+  let stripped = value;
+
+  for (const stopTerm of STOP_TERMS) {
+    stripped = stripped.replaceAll(stopTerm, " ");
+  }
+
+  return stripped;
+}
+
+function matchDictionaryTerms(value: string, dictionary: readonly string[]): string[] {
+  const normalizedValue = stripStopTerms(normalize(value));
+  if (!normalizedValue) return [];
+
+  return dictionary.filter((term) => normalizedValue.includes(term));
+}
+
+function extractTriggerKeywords(value: string, dictionary: readonly string[]): string[] {
+  const keywordSet = new Set<string>();
+
+  matchDictionaryTerms(value, dictionary).forEach((keyword) => keywordSet.add(keyword));
+  extractMeaningfulTerms(value).forEach((keyword) => keywordSet.add(keyword));
+
+  return Array.from(keywordSet);
+}
+
 export function buildKnowledgeBaseQuerySignals(query: string): QuerySignals {
   const normalizedQuery = normalize(query);
   const phraseSet = new Set<string>();
   const looseTermSet = new Set<string>();
+  const dictionary = getKnowledgeBaseDictionary();
 
   normalizedQuery
     .split(/[^\p{L}\p{N}\u4e00-\u9fff]+/u)
@@ -158,11 +257,15 @@ export function buildKnowledgeBaseQuerySignals(query: string): QuerySignals {
       }
     });
 
-  const hanMatches = normalizedQuery.match(/[\u4e00-\u9fff]{2,}/g) || [];
+  const hanMatches = normalizedQuery.match(HAN_SEGMENT_PATTERN) || [];
   hanMatches.forEach((part) => {
     if (!STOP_TERMS.has(part)) {
       phraseSet.add(part);
     }
+
+    matchDictionaryTerms(part, dictionary).forEach((term) => {
+      phraseSet.add(term);
+    });
 
     if (part.length >= 4) {
       for (let index = 0; index <= part.length - 3; index += 1) {
@@ -196,6 +299,39 @@ function normalize(value: string): string {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function scoreTriggerMatch(normalizedQuery: string, triggerQuestions: string[], queryPhrases: string[]): number {
+  if (!normalizedQuery || triggerQuestions.length === 0) return 0;
+
+  const dictionary = getKnowledgeBaseDictionary();
+  let bestScore = 0;
+
+  for (const trigger of triggerQuestions) {
+    if (trigger.includes(normalizedQuery) || normalizedQuery.includes(trigger)) {
+      return 80;
+    }
+
+    const triggerKeywords = extractTriggerKeywords(trigger, dictionary);
+    if (triggerKeywords.length === 0) continue;
+
+    const matchedCount = triggerKeywords.filter(
+      (keyword) =>
+        normalizedQuery.includes(keyword) ||
+        queryPhrases.some((phrase) => phrase.includes(keyword) || keyword.includes(phrase))
+    ).length;
+
+    const coverage = matchedCount / triggerKeywords.length;
+    if (coverage >= 0.8) {
+      bestScore = Math.max(bestScore, 60);
+    } else if (coverage >= 0.5) {
+      bestScore = Math.max(bestScore, 35);
+    } else if (coverage >= 0.3) {
+      bestScore = Math.max(bestScore, 15);
+    }
+  }
+
+  return bestScore;
+}
+
 function scoreEntry(entry: KnowledgeBaseEntry, signals: QuerySignals, role: string): number {
   const title = normalize(entry.title);
   const category = normalize(entry.category);
@@ -225,12 +361,7 @@ function scoreEntry(entry: KnowledgeBaseEntry, signals: QuerySignals, role: stri
     if (framework.includes(term)) score += 4;
   }
 
-  if (
-    signals.normalizedQuery &&
-    triggerQuestions.some((item) => item.includes(signals.normalizedQuery) || signals.normalizedQuery.includes(item))
-  ) {
-    score += 80;
-  }
+  score += scoreTriggerMatch(signals.normalizedQuery, triggerQuestions, signals.phrases);
 
   const roleLabels = ROLE_LABELS[role] || [];
   if (entry.roles.includes("全员")) {
@@ -253,7 +384,7 @@ export function selectKnowledgeBaseEntries(
       entry,
       score: scoreEntry(entry, signals, role),
     }))
-    .filter((item) => item.score > 0)
+    .filter((item) => item.score >= ABSOLUTE_MIN_SCORE)
     .sort((left, right) => right.score - left.score);
 
   if (ranked.length === 0) return [];

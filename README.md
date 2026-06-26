@@ -43,6 +43,42 @@ The chat route now supports two knowledge strategies:
 
 The assistant UI also shows which `Wiki / KB / 资料` sources were used for each answer.
 
+### Vector RAG
+
+The project now includes an optional Phase 1 vector retrieval path for published Wiki pages.
+
+- current status: semantic retrieval is a fallback for `Wiki 优先` when keyword recall is weak
+- recommended stack: `text-embedding-3-large` with `RAG_EMBEDDING_DIMENSIONS=1024`
+- recommended vector store: Postgres with `pgvector`
+
+Minimal setup:
+
+```bash
+DATABASE_URL=postgres://...
+RAG_ENABLED=true
+RAG_OPENAI_API_KEY=sk-...
+RAG_EMBEDDING_MODEL=text-embedding-3-large
+RAG_EMBEDDING_DIMENSIONS=1024
+```
+
+Then in your Postgres database run:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+Finally, build the initial Wiki vector index:
+
+```bash
+npm run rag:reindex-wiki
+```
+
+Notes:
+
+- the current implementation indexes `published wiki pages` only
+- vector retrieval is intentionally a fallback, not a replacement for the current keyword/wiki flow
+- if RAG is not configured, the app keeps using the existing retrieval logic
+
 ### Main Site SSO
 
 This project can now be mounted as a protected bot behind your main website login flow, similar to the `seedance-main` project.
