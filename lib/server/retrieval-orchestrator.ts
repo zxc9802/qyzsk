@@ -9,6 +9,7 @@ import {
   type KnowledgeBaseEntry,
 } from "@/lib/server/kb-retrieval";
 import { buildConversationFileRetrieval } from "@/lib/server/file-retrieval";
+import { searchCanonicalWikiPagesByVector, searchKbEntriesByVector } from "@/lib/server/rag-retrieval";
 import { searchWikiPages } from "@/lib/server/wiki-search";
 import { listPublishedPages } from "@/lib/server/wiki-store";
 import { getWikiRelationTypeLabel } from "@/lib/wiki-relations";
@@ -19,6 +20,8 @@ const MAX_WIKI_CONTEXT_CHARS = 7600;
 const MAX_WIKI_PAGES = 4;
 const MAX_WIKI_RELATION_SUMMARIES = 3;
 const MAX_KB_BACKFILL_ENTRIES = 3;
+const MAX_KB_VECTOR_ENTRIES = 4;
+const MAX_KB_ENTRIES = 10;
 const MAX_VALUE_WIKI_PAGES = 1;
 const MAX_VALUE_KB_ENTRIES = 2;
 const WIKI_SCORE_THRESHOLD = 16;
@@ -102,8 +105,6 @@ export type RetrievalHistoryMessage = {
   role: "user" | "assistant";
   content: string;
 };
-
-type VectorWikiSearchResult = Awaited<ReturnType<typeof searchWikiPages>>;
 
 function trimForContext(value: string, maxChars: number) {
   if (value.length <= maxChars) return value;
@@ -269,7 +270,7 @@ function buildRelatedWikiContext(
 
 function mergeWikiSearchResults(
   keywordResults: Awaited<ReturnType<typeof searchWikiPages>>,
-  vectorResults: VectorWikiSearchResult
+  vectorResults: Awaited<ReturnType<typeof searchCanonicalWikiPagesByVector>>
 ) {
   const merged = new Map<
     string,
@@ -299,27 +300,6 @@ function mergeWikiSearchResults(
   });
 
   return Array.from(merged.values()).sort((left, right) => right.score - left.score);
-}
-
-async function searchCanonicalWikiPagesByVectorWithFallback(options: {
-  query: string;
-  topK?: number;
-}): Promise<VectorWikiSearchResult> {
-  const modulePath = ["@/lib/server", "rag-retrieval"].join("/");
-
-  try {
-    const ragModule = await import(modulePath);
-    return ragModule.searchCanonicalWikiPagesByVector(options);
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      (error.message.includes(modulePath) || error.message.includes("rag-retrieval"))
-    ) {
-      return [];
-    }
-
-    throw error;
-  }
 }
 
 function selectWikiPages(pages: Awaited<ReturnType<typeof searchWikiPages>>) {
@@ -449,7 +429,7 @@ export async function buildRetrievalOrchestratorResult(options: {
   const keywordSelectedWikiPages = selectWikiPages(keywordWikiSearchResults);
   const vectorWikiSearchResults =
     shouldUseWiki && keywordSelectedWikiPages.length < 2
-      ? await searchCanonicalWikiPagesByVectorWithFallback({
+      ? await searchCanonicalWikiPagesByVector({
           query: retrievalQuery,
           topK: 4,
         }).catch((error) => {
@@ -501,8 +481,24 @@ export async function buildRetrievalOrchestratorResult(options: {
     shouldUseWiki && selectedWikiPages.length > 0
       ? backfillKnowledgeBaseEntries(retrievalQuery, options.role, selectedWikiPages)
       : selectKnowledgeBaseEntriesByQuery(retrievalQuery, options.role);
-  const valueKbEntries = selectValueKnowledgeBaseEntries(valueRetrievalQuery, options.role, primaryKbEntries);
-  const kbEntries = uniqueKnowledgeBaseEntries([...primaryKbEntries, ...valueKbEntries]);
+  // 向量召回：用 triggerQuestion 向量索引补出口语化、字面不重合的 KB 条目。
+  // 未配置 RAG 时返回空数组，自动退化为纯关键词检索，保持原有行为。
+  const vectorKbEntries = (
+    await searchKbEntriesByVector({ query: retrievalQuery, topK: MAX_KB_VECTOR_ENTRIES }).catch((error) => {
+      console.error("KB vector retrieval error:", error);
+      return [];
+    })
+  ).map((item) => item.entry);
+  const valueKbEntries = selectValueKnowledgeBaseEntries(
+    valueRetrievalQuery,
+    options.role,
+    [...primaryKbEntries, ...vectorKbEntries]
+  );
+  const kbEntries = uniqueKnowledgeBaseEntries([
+    ...primaryKbEntries,
+    ...valueKbEntries,
+    ...vectorKbEntries,
+  ]).slice(0, MAX_KB_ENTRIES);
   const kbContext = buildKnowledgeBaseContextFromEntries(kbEntries);
   const kbHits: KnowledgeBaseHit[] = kbEntries.map(toKnowledgeBaseHit);
 

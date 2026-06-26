@@ -4,7 +4,9 @@ import {
   buildKnowledgeBaseQuerySignals,
   buildKnowledgeBaseRetrieval,
   selectKnowledgeBaseEntriesByQuery,
+  type KnowledgeBaseEntry,
 } from "@/lib/server/kb-retrieval";
+import { buildKbEntryRagChunks } from "@/lib/server/rag-chunking";
 
 function selectIds(query: string, role: string): string[] {
   return selectKnowledgeBaseEntriesByQuery(query, role).map((entry) => entry.id);
@@ -60,4 +62,46 @@ test("buildKnowledgeBaseRetrieval drops unrelated questions instead of injecting
 
   assert.deepEqual(retrieval.hits, []);
   assert.equal(retrieval.context, "");
+});
+
+function makeEntry(overrides: Partial<KnowledgeBaseEntry> = {}): KnowledgeBaseEntry {
+  return {
+    id: "KB001",
+    title: "测试条目",
+    category: "店铺运营",
+    roles: ["运营岗"],
+    triggerQuestions: ["店铺不出单怎么排查？", "转化率低怎么办？"],
+    standardAnswer: "先看异议是否被消除。",
+    framework: "",
+    nextActions: "",
+    relatedTerms: ["不出单", "转化"],
+    ...overrides,
+  };
+}
+
+test("buildKbEntryRagChunks creates one chunk per trigger question with entry context", () => {
+  const entry = makeEntry();
+  const chunks = buildKbEntryRagChunks(entry);
+
+  assert.equal(chunks.length, 2);
+  assert.equal(chunks[0].sourceType, "kb_entry");
+  assert.equal(chunks[0].sourceId, "KB001");
+  assert.equal(chunks[0].chunkIndex, 0);
+  assert.equal(chunks[1].chunkIndex, 1);
+  assert.match(chunks[0].content, /店铺不出单怎么排查/);
+  assert.match(chunks[0].content, /测试条目/);
+  assert.match(chunks[0].content, /先看异议是否被消除/);
+});
+
+test("buildKbEntryRagChunks falls back to standard answer when no trigger questions", () => {
+  const entry = makeEntry({ triggerQuestions: [], standardAnswer: "兜底回答" });
+  const chunks = buildKbEntryRagChunks(entry);
+
+  assert.equal(chunks.length, 1);
+  assert.match(chunks[0].content, /兜底回答/);
+});
+
+test("buildKbEntryRagChunks returns nothing when entry has no searchable text", () => {
+  const entry = makeEntry({ triggerQuestions: [], standardAnswer: "", title: "" });
+  assert.equal(buildKbEntryRagChunks(entry).length, 0);
 });
