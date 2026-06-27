@@ -22,3 +22,13 @@ test("other chat model labels stay unchanged", () => {
     ]
   );
 });
+
+test("Gemini quick routes to the configured Yunwu Gemini chat model", () => {
+  const quick = getChatModelOption("yunwu-gemini-3-flash-preview");
+
+  assert.equal(quick.label, "Gemini 快速");
+  assert.equal(quick.provider, "yunwu");
+  assert.equal(quick.apiModel, "gemini-3.5-flash");
+  assert.equal(quick.apiModelEnvName, "YUNWU_GEMINI_CHAT_MODEL");
+  assert.equal(quick.apiKeyEnvName, "YUNWU_GEMINI_API_KEY");
+});

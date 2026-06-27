@@ -51,8 +51,9 @@ export const CHAT_MODELS: ChatModelOption[] = [
     label: "Gemini 快速",
     shortLabel: "Gemini 快速",
     provider: "yunwu",
-    apiModel: "gemini-3-flash-preview",
+    apiModel: "gemini-3.5-flash",
     description: "更快，适合日常追问",
+    apiModelEnvName: "YUNWU_GEMINI_CHAT_MODEL",
     apiKeyEnvName: "YUNWU_GEMINI_API_KEY",
   },
   {
