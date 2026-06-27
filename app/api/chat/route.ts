@@ -5,6 +5,12 @@ import { DEFAULT_KNOWLEDGE_MODE, isKnowledgeMode } from "@/lib/knowledge-mode";
 import { buildSimpleAnswerPrompt, buildSystemPrompt } from "@/lib/system-prompt";
 import { buildConversationFileDiagnosisContext } from "@/lib/server/file-retrieval";
 import {
+  buildClaudeMessagesPayload,
+  extractClaudeStreamContent,
+  readClaudeMessagesText,
+  type ProviderMessage,
+} from "@/lib/server/claude-messages";
+import {
   generateGeminiResultWithClient,
   generateGeminiTextWithClient,
   type GeminiGroundingMetadata,
@@ -65,6 +71,12 @@ const PROVIDER_CONFIG = {
     apiUrl: buildApiUrl(process.env.YUNWU_BASE_URL || "https://yunwu.ai/v1"),
     displayName: "Yunwu 网关",
   },
+  yunwu_claude_messages: {
+    apiKey: process.env.YUNWU_CLAUDE_CHAT_API_KEY?.trim() || "",
+    baseUrl: buildProviderBaseUrl(process.env.YUNWU_CLAUDE_MESSAGES_URL || ""),
+    apiUrl: process.env.YUNWU_CLAUDE_MESSAGES_URL?.trim() || "",
+    displayName: "Claude 网关",
+  },
 } as const;
 
 function resolveProviderConfig(modelOption: ReturnType<typeof getChatModelOption>) {
@@ -76,6 +88,13 @@ function resolveProviderConfig(modelOption: ReturnType<typeof getChatModelOption
     ...provider,
     apiKey,
   };
+}
+
+function resolveApiModel(modelOption: ReturnType<typeof getChatModelOption>): string {
+  return (
+    (modelOption.apiModelEnvName ? process.env[modelOption.apiModelEnvName]?.trim() : modelOption.apiModel) ||
+    modelOption.apiModel
+  );
 }
 
 function getOfficialGeminiConfig(): GeminiNativeClientConfig {
@@ -210,12 +229,89 @@ async function runModelDiagnosis(
   }
 }
 
+async function runClaudeModelDiagnosis(
+  apiUrl: string,
+  apiKey: string,
+  apiModel: string,
+  prompt: string | OpenAIContentPart[]
+): Promise<string | null> {
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(
+      buildClaudeMessagesPayload({
+        model: apiModel,
+        stream: false,
+        temperature: 0.1,
+        maxTokens: 300,
+        messages: [
+          {
+            role: "system",
+            content: "你只做 JSON 诊断输出，不做业务回答，不要输出多余文字。",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+      })
+    ),
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  try {
+    const parsed = await response.json();
+    return readClaudeMessagesText(parsed) || null;
+  } catch {
+    return null;
+  }
+}
+
+function isClaudeMessagesModel(modelOption: ReturnType<typeof getChatModelOption>): boolean {
+  return modelOption.provider === "yunwu_claude_messages";
+}
+
 function isGeminiModel(modelOption: ReturnType<typeof getChatModelOption>): boolean {
   return modelOption.apiModel.startsWith("gemini-");
 }
 
 function isGptModel(modelOption: ReturnType<typeof getChatModelOption>): boolean {
   return modelOption.apiModel.startsWith("gpt-");
+}
+
+function buildProviderRequestBody(
+  modelOption: ReturnType<typeof getChatModelOption>,
+  apiModel: string,
+  messages: ProviderMessage[],
+  options: {
+    stream: boolean;
+    maxTokens: number;
+    temperature: number;
+  }
+) {
+  if (isClaudeMessagesModel(modelOption)) {
+    return buildClaudeMessagesPayload({
+      model: apiModel,
+      messages,
+      stream: options.stream,
+      maxTokens: options.maxTokens,
+      temperature: options.temperature,
+    });
+  }
+
+  return {
+    model: apiModel,
+    messages,
+    stream: options.stream,
+    max_tokens: options.maxTokens,
+    temperature: options.temperature,
+  };
 }
 
 function buildGeminiClient(
@@ -525,6 +621,7 @@ export async function POST(req: NextRequest) {
     const resolvedWebSearchEnabled = webSearchEnabled === true;
     const resolvedHasShownClarificationGuide = hasShownClarificationGuide === true;
     const modelOption = getChatModelOption(resolvedModelId);
+    const apiModel = resolveApiModel(modelOption);
     const provider = resolveProviderConfig(modelOption);
     const geminiClient = buildGeminiClient(modelOption, provider);
     const budgetConfig = getContextBudgetConfig(resolvedModelId);
@@ -559,15 +656,24 @@ export async function POST(req: NextRequest) {
             geminiClient && mediaContext.hasMedia
               ? await generateGeminiTextWithClient({
                   client: geminiClient,
-                  model: modelOption.apiModel,
+                  model: apiModel,
                   systemInstruction: "你只做 JSON 诊断输出，不做业务回答，不要输出多余文字。",
                   parts: [{ text: fallbackDiagnosisResult.modelReviewPrompt }, ...mediaContext.geminiParts],
                   temperature: 0.1,
                 }).catch(() => null)
+              : isClaudeMessagesModel(modelOption)
+                ? await runClaudeModelDiagnosis(
+                    provider.apiUrl,
+                    provider.apiKey,
+                    apiModel,
+                    mediaContext.hasMedia
+                      ? [buildOpenAITextPart(fallbackDiagnosisResult.modelReviewPrompt), ...mediaContext.openAIParts]
+                      : fallbackDiagnosisResult.modelReviewPrompt
+                  )
               : await runModelDiagnosis(
                   provider.apiUrl,
                   provider.apiKey,
-                  modelOption.apiModel,
+                  apiModel,
                   mediaContext.hasMedia
                     ? [buildOpenAITextPart(fallbackDiagnosisResult.modelReviewPrompt), ...mediaContext.openAIParts]
                     : fallbackDiagnosisResult.modelReviewPrompt
@@ -586,15 +692,24 @@ export async function POST(req: NextRequest) {
           geminiClient && mediaContext.hasMedia
             ? await generateGeminiTextWithClient({
                 client: geminiClient,
-                model: modelOption.apiModel,
+                model: apiModel,
                 systemInstruction: "你只做 JSON 诊断输出，不做业务回答，不要输出多余文字。",
                 parts: [{ text: diagnosisPrompt }, ...mediaContext.geminiParts],
                 temperature: 0.1,
               }).catch(() => null)
+            : isClaudeMessagesModel(modelOption)
+              ? await runClaudeModelDiagnosis(
+                  provider.apiUrl,
+                  provider.apiKey,
+                  apiModel,
+                  mediaContext.hasMedia
+                    ? [buildOpenAITextPart(diagnosisPrompt), ...mediaContext.openAIParts]
+                    : diagnosisPrompt
+                )
             : await runModelDiagnosis(
                 provider.apiUrl,
                 provider.apiKey,
-                modelOption.apiModel,
+                apiModel,
                 mediaContext.hasMedia
                   ? [buildOpenAITextPart(diagnosisPrompt), ...mediaContext.openAIParts]
                   : diagnosisPrompt
@@ -751,7 +866,7 @@ export async function POST(req: NextRequest) {
         try {
           const groundedResult = await generateGeminiResultWithClient({
             client: geminiSearchClient,
-            model: modelOption.apiModel,
+            model: apiModel,
             systemInstruction: systemPrompt,
             parts: [{ text: answerContext }, ...mediaContext.geminiParts],
             temperature: 0.3,
@@ -796,7 +911,7 @@ export async function POST(req: NextRequest) {
                 apiKey: provider.apiKey,
                 toolType: "web_search_preview",
               },
-              model: modelOption.apiModel,
+              model: apiModel,
               instructions: `${systemPrompt}\n\n${webSearchInstruction}`,
               input: answerContext,
             });
@@ -836,7 +951,7 @@ export async function POST(req: NextRequest) {
       try {
         const answerText = await generateGeminiTextWithClient({
           client: geminiClient,
-          model: modelOption.apiModel,
+          model: apiModel,
           systemInstruction: systemPrompt,
           parts: [
             {
@@ -860,17 +975,18 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const systemProviderMessage = (content: string): ProviderMessage => ({ role: "system", content });
     const buildProviderMessages = (
       currentRecentHistory: HistoryMessage[],
       currentConversationMemoryContext: string
-    ) => [
-      { role: "system", content: systemPrompt },
-      ...(diagnosisGuardrailContext ? [{ role: "system", content: diagnosisGuardrailContext }] : []),
-      ...(selectedScopeContext ? [{ role: "system", content: selectedScopeContext }] : []),
-      ...(effectiveKnowledgeContext ? [{ role: "system", content: effectiveKnowledgeContext }] : []),
-      ...(fileContext ? [{ role: "system", content: fileContext }] : []),
-      ...(currentConversationMemoryContext ? [{ role: "system", content: currentConversationMemoryContext }] : []),
-      ...currentRecentHistory.map((item) => ({
+    ): ProviderMessage[] => [
+      systemProviderMessage(systemPrompt),
+      ...(diagnosisGuardrailContext ? [systemProviderMessage(diagnosisGuardrailContext)] : []),
+      ...(selectedScopeContext ? [systemProviderMessage(selectedScopeContext)] : []),
+      ...(effectiveKnowledgeContext ? [systemProviderMessage(effectiveKnowledgeContext)] : []),
+      ...(fileContext ? [systemProviderMessage(fileContext)] : []),
+      ...(currentConversationMemoryContext ? [systemProviderMessage(currentConversationMemoryContext)] : []),
+      ...currentRecentHistory.map((item): ProviderMessage => ({
         role: item.role,
         content: item.content,
       })),
@@ -889,13 +1005,11 @@ export async function POST(req: NextRequest) {
         Authorization: `Bearer ${provider.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: modelOption.apiModel,
-        messages,
+      body: JSON.stringify(buildProviderRequestBody(modelOption, apiModel, messages, {
         stream: true,
-        max_tokens: 4096,
+        maxTokens: 4096,
         temperature: 0.3,
-      }),
+      })),
     });
 
     let providerError: UpstreamErrorDetails | null = null;
@@ -923,13 +1037,11 @@ export async function POST(req: NextRequest) {
             Authorization: `Bearer ${provider.apiKey}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            model: modelOption.apiModel,
-            messages,
+          body: JSON.stringify(buildProviderRequestBody(modelOption, apiModel, messages, {
             stream: true,
-            max_tokens: 4096,
+            maxTokens: 4096,
             temperature: 0.3,
-          }),
+          })),
         });
         if (!response.ok) {
           const retryErrText = await response.text();
@@ -1025,6 +1137,12 @@ export async function POST(req: NextRequest) {
               const data = line.slice(6).trim();
               if (data === "[DONE]") {
                 safeEnqueue("data: [DONE]\n\n");
+                continue;
+              }
+
+              const claudeContent = isClaudeMessagesModel(modelOption) ? extractClaudeStreamContent(data) : null;
+              if (claudeContent) {
+                safeEnqueue(`data: ${JSON.stringify({ content: claudeContent })}\n\n`);
                 continue;
               }
 

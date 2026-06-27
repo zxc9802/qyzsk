@@ -1,4 +1,5 @@
 import { getChatModelOption } from "@/lib/chat-models";
+import { buildClaudeMessagesPayload, readClaudeMessagesText } from "@/lib/server/claude-messages";
 
 const PROVIDER_CONFIG = {
   newapi: {
@@ -10,6 +11,11 @@ const PROVIDER_CONFIG = {
     apiKey: process.env.YUNWU_API_KEY?.trim() || "",
     apiUrl: buildApiUrl(process.env.YUNWU_BASE_URL || "https://yunwu.ai/v1"),
     displayName: "Yunwu 网关",
+  },
+  yunwu_claude_messages: {
+    apiKey: process.env.YUNWU_CLAUDE_CHAT_API_KEY?.trim() || "",
+    apiUrl: process.env.YUNWU_CLAUDE_MESSAGES_URL?.trim() || "",
+    displayName: "Claude 网关",
   },
 } as const;
 
@@ -27,9 +33,15 @@ function resolveProviderConfig(modelId: string) {
   const provider = PROVIDER_CONFIG[modelOption.provider];
   const apiKey =
     (modelOption.apiKeyEnvName ? process.env[modelOption.apiKeyEnvName]?.trim() : provider.apiKey) || "";
+  const apiModel =
+    (modelOption.apiModelEnvName ? process.env[modelOption.apiModelEnvName]?.trim() : modelOption.apiModel) ||
+    modelOption.apiModel;
 
   return {
-    modelOption,
+    modelOption: {
+      ...modelOption,
+      apiModel,
+    },
     provider: {
       ...provider,
       apiKey,
@@ -48,6 +60,67 @@ export async function generateModelText(options: {
 
   if (!provider.apiUrl || !provider.apiKey) {
     throw new Error(`${provider.displayName} 还没有配置完整。`);
+  }
+
+  if (modelOption.provider === "yunwu_claude_messages") {
+    const response = await fetch(provider.apiUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${provider.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(
+        buildClaudeMessagesPayload({
+          model: modelOption.apiModel,
+          stream: false,
+          temperature: options.temperature ?? 0.2,
+          maxTokens: options.maxTokens ?? 2600,
+          messages: [
+            {
+              role: "system",
+              content: options.systemPrompt,
+            },
+            {
+              role: "user",
+              content: options.userPrompt,
+            },
+          ],
+        })
+      ),
+    });
+
+    const rawText = await response.text();
+    let payload: unknown = null;
+
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      if (!response.ok) {
+        throw new Error(rawText.slice(0, 300) || "模型返回了空错误信息。");
+      }
+    }
+
+    if (!response.ok) {
+      const message =
+        typeof payload === "object" &&
+        payload &&
+        "error" in payload &&
+        typeof payload.error === "object" &&
+        payload.error &&
+        "message" in payload.error &&
+        typeof payload.error.message === "string"
+          ? payload.error.message
+          : rawText.slice(0, 300) || "模型调用失败。";
+
+      throw new Error(message);
+    }
+
+    const content = readClaudeMessagesText(payload);
+    if (!content.trim()) {
+      throw new Error("模型返回了空内容。");
+    }
+
+    return content.trim();
   }
 
   const response = await fetch(provider.apiUrl, {

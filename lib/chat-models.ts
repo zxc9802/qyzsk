@@ -1,4 +1,4 @@
-export type ChatProviderId = "newapi" | "yunwu";
+export type ChatProviderId = "newapi" | "yunwu" | "yunwu_claude_messages";
 
 export type ChatModelId =
   | "gemini-3.1-pro-preview"
@@ -12,6 +12,7 @@ export interface ChatModelOption {
   provider: ChatProviderId;
   apiModel: string;
   description: string;
+  apiModelEnvName?: string;
   apiKeyEnvName?: string;
 }
 
@@ -37,11 +38,13 @@ const LEGACY_MODEL_OPTIONS: Record<string, ChatModelOption> = {
 export const CHAT_MODELS: ChatModelOption[] = [
   {
     id: "gemini-3.1-pro-preview",
-    label: "Gemini 思考",
-    shortLabel: "Gemini 思考",
-    provider: "newapi",
-    apiModel: "gemini-3.1-pro-preview",
-    description: "当前 Gemini 主模型",
+    label: "claude-opus-4-6",
+    shortLabel: "claude-opus-4-6",
+    provider: "yunwu_claude_messages",
+    apiModel: "claude-opus-4-6",
+    description: "当前 Claude 主模型",
+    apiModelEnvName: "YUNWU_CLAUDE_CHAT_MODEL",
+    apiKeyEnvName: "YUNWU_CLAUDE_CHAT_API_KEY",
   },
   {
     id: "yunwu-gemini-3-flash-preview",
