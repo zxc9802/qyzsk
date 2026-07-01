@@ -5,137 +5,12 @@ import { getChatModelOption } from "@/lib/chat-models";
 import { getWikiCategoryLabel } from "@/lib/wiki-category-labels";
 import { Message } from "@/lib/types";
 import { sanitizeAssistantOutput } from "@/lib/sanitize-assistant-output";
+import { parseMessageMarkdown } from "@/lib/client/message-markdown";
 
 interface MessageBubbleProps {
   message: Message;
   isStreaming?: boolean;
   showQuestionDiagnosis?: boolean;
-}
-
-function escapeHtmlText(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function escapeHtmlAttr(text: string): string {
-  return escapeHtmlText(text).replace(/"/g, "&quot;");
-}
-
-function normalizeCitationHost(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-
-  try {
-    return new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`).hostname
-      .replace(/^www\./, "")
-      .toLowerCase();
-  } catch {
-    return trimmed
-      .replace(/^https?:\/\//, "")
-      .replace(/^www\./, "")
-      .replace(/\/.*$/, "")
-      .toLowerCase();
-  }
-}
-
-function findMatchingWebHit(candidate: string, webHits: RetrievalSourceHit[]): RetrievalSourceHit | undefined {
-  const normalizedCandidate = normalizeCitationHost(candidate);
-  if (!normalizedCandidate) return undefined;
-
-  return webHits.find((hit) => {
-    const hitHost = normalizeCitationHost(hit.siteName || hit.url || "");
-    return Boolean(hitHost) && hitHost === normalizedCandidate;
-  });
-}
-
-function buildInlineCitationHtml(hit: RetrievalSourceHit, label?: string): string {
-  const displayLabel = (label?.trim() || hit.siteName || hit.title || "来源").trim();
-  const href = escapeHtmlAttr(hit.url || "#");
-  const title = escapeHtmlAttr(hit.title);
-
-  return `<a href="${href}" target="_blank" rel="noreferrer" class="inline-citation-badge" title="${title}"><span class="inline-citation-icon" aria-hidden="true">↗</span><span class="inline-citation-label">${escapeHtmlText(displayLabel)}</span></a>`;
-}
-
-function parseMarkdown(text: string, webHits: RetrievalSourceHit[] = [], usedWebHitIds?: Set<string>): string {
-  const placeholders: string[] = [];
-  const storePlaceholder = (value: string) => {
-    const token = `__HTML_PLACEHOLDER_${placeholders.length}__`;
-    placeholders.push(value);
-    return token;
-  };
-  const trackWebHit = (hit?: RetrievalSourceHit) => {
-    if (hit) {
-      usedWebHitIds?.add(hit.id);
-    }
-  };
-
-  let html = text
-    .replace(
-      /[（(]\s*\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)\s*[)）]/g,
-      (_, label: string, url: string) => {
-        const hit = findMatchingWebHit(url, webHits);
-        if (!hit) return storePlaceholder(
-          `<a href="${escapeHtmlAttr(url)}" target="_blank" rel="noreferrer" class="inline-source-link">${escapeHtmlText(label)}</a>`
-        );
-        trackWebHit(hit);
-        return storePlaceholder(buildInlineCitationHtml(hit, label));
-      }
-    )
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label: string, url: string) => {
-      const hit = findMatchingWebHit(url, webHits);
-      if (!hit) {
-        return storePlaceholder(
-          `<a href="${escapeHtmlAttr(url)}" target="_blank" rel="noreferrer" class="inline-source-link">${escapeHtmlText(label)}</a>`
-        );
-      }
-
-      trackWebHit(hit);
-      return storePlaceholder(buildInlineCitationHtml(hit, label));
-    })
-    .replace(/[（(]\s*([a-z0-9.-]+\.[a-z]{2,})\s*[)）]/gi, (match, host: string) => {
-      const hit = findMatchingWebHit(host, webHits);
-      if (!hit) return match;
-
-      trackWebHit(hit);
-      return storePlaceholder(buildInlineCitationHtml(hit, host));
-    });
-
-  html = escapeHtmlText(html);
-
-  html = html.replace(/^---$/gm, "<hr />");
-  html = html.replace(/^#{1,6}\s*(.+)$/gm, "<h3>$1</h3>");
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-  html = html.replace(/^&gt; (.+)$/gm, "<blockquote>$1</blockquote>");
-
-  html = html.replace(/^[*\-] (.+)$/gm, '<li class="md-ul">$1</li>');
-  html = html.replace(/^\d+\. (.+)$/gm, '<li class="md-ol">$1</li>');
-  html = html.replace(/((?:<li class="md-ul">.*<\/li>\n?)+)/g, "<ul>$1</ul>");
-  html = html.replace(/((?:<li class="md-ol">.*<\/li>\n?)+)/g, "<ol>$1</ol>");
-  html = html.replace(/ class="md-ul"/g, "").replace(/ class="md-ol"/g, "");
-
-  html = html.replace(/\n\n/g, "</p><p>");
-  html = `<p>${html}</p>`;
-
-  html = html.replace(/<p>\s*<\/p>/g, "");
-  html = html.replace(/<p>\s*(<h3>)/g, "$1");
-  html = html.replace(/(<\/h3>)\s*<\/p>/g, "$1");
-  html = html.replace(/<p>\s*(<ul>)/g, "$1");
-  html = html.replace(/(<\/ul>)\s*<\/p>/g, "$1");
-  html = html.replace(/<p>\s*(<ol>)/g, "$1");
-  html = html.replace(/(<\/ol>)\s*<\/p>/g, "$1");
-  html = html.replace(/<p>\s*(<blockquote>)/g, "$1");
-  html = html.replace(/(<\/blockquote>)\s*<\/p>/g, "$1");
-  html = html.replace(/<p>\s*(<hr \/>)/g, "$1");
-  html = html.replace(/(<hr \/>)\s*<\/p>/g, "$1");
-
-  placeholders.forEach((placeholder, index) => {
-    html = html.replaceAll(`__HTML_PLACEHOLDER_${index}__`, placeholder);
-  });
-
-  return html;
 }
 
 function renderWebCitationChips(hits: RetrievalSourceHit[]) {
@@ -178,11 +53,11 @@ function renderStructuredResponse(content: string, isStreaming: boolean, webHits
     return (
       <div>
         <div className="conclusion-box">
-          <div className="ai-markdown" dangerouslySetInnerHTML={{ __html: parseMarkdown(conclusionText, webHits, usedWebHitIds) }} />
+          <div className="ai-markdown" dangerouslySetInnerHTML={{ __html: parseMessageMarkdown(conclusionText, webHits, usedWebHitIds) }} />
         </div>
         <div
           className={`ai-markdown ${isStreaming ? "streaming-cursor" : ""}`}
-          dangerouslySetInnerHTML={{ __html: parseMarkdown(rest, webHits, usedWebHitIds) }}
+          dangerouslySetInnerHTML={{ __html: parseMessageMarkdown(rest, webHits, usedWebHitIds) }}
         />
         {renderWebCitationChips(buildUnusedWebHits())}
       </div>
@@ -193,7 +68,7 @@ function renderStructuredResponse(content: string, isStreaming: boolean, webHits
     <div>
       <div
         className={`ai-markdown ${isStreaming ? "streaming-cursor" : ""}`}
-        dangerouslySetInnerHTML={{ __html: parseMarkdown(content, webHits, usedWebHitIds) }}
+        dangerouslySetInnerHTML={{ __html: parseMessageMarkdown(content, webHits, usedWebHitIds) }}
       />
       {renderWebCitationChips(buildUnusedWebHits())}
     </div>
