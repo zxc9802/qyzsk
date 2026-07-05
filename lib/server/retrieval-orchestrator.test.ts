@@ -195,6 +195,17 @@ version: 1
   });
 });
 
+test("vector retrieval uses larger candidate pools while keeping final context caps", async () => {
+  const { VECTOR_RETRIEVAL_LIMITS } = await importRetrievalModule();
+
+  assert.deepEqual(VECTOR_RETRIEVAL_LIMITS, {
+    wikiVectorChunks: 10,
+    kbVectorChunks: 12,
+    finalWikiPages: 4,
+    finalKbEntries: 10,
+  });
+});
+
 test("mergeWikiSearchResults fuses keyword and vector results via RRF", async () => {
   const { mergeWikiSearchResults } = await importRetrievalModule();
 
