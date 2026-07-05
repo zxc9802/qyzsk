@@ -42,12 +42,35 @@ function buildTerms(query: string, diagnosis?: QuestionDiagnosis): string[] {
       terms.add(part);
     }
 
+    if (part.length >= 3) {
+      for (let index = 0; index <= part.length - 2; index += 1) {
+        const term = part.slice(index, index + 2);
+        if (!STOP_TERMS.has(term)) {
+          terms.add(term);
+        }
+      }
+    }
+
     if (part.length >= 4) {
       for (let index = 0; index <= part.length - 3; index += 1) {
-        terms.add(part.slice(index, index + 3));
+        const term = part.slice(index, index + 3);
+        if (!STOP_TERMS.has(term)) {
+          terms.add(term);
+        }
       }
     }
   });
+
+  if (normalized.includes("不出单") || normalized.includes("出单")) {
+    ["运营漏斗", "漏斗诊断", "转化", "成交"].forEach((term) => terms.add(term));
+  }
+
+  if (
+    (normalized.includes("新人") || normalized.includes("新员工")) &&
+    (normalized.includes("问 ai") || normalized.includes("问ai") || normalized.includes("提问"))
+  ) {
+    ["新员工提问", "提问原则", "补充业务上下文"].forEach((term) => terms.add(term));
+  }
 
   if (diagnosis) {
     terms.add(diagnosis.categoryLabel);

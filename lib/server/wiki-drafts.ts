@@ -73,6 +73,10 @@ function trimForModel(value: string, maxChars: number) {
   return `${value.slice(0, maxChars)}...`;
 }
 
+function isDraftBatchModelPayload(value: unknown): value is { drafts: DraftModelPayload[] } {
+  return typeof value === "object" && value !== null && Array.isArray((value as DraftBatchModelPayload).drafts);
+}
+
 function buildFallbackSummary(content: string) {
   return content
     .replace(/\s+/g, " ")
@@ -165,7 +169,7 @@ function parseDraftPayloads(raw: string): DraftModelPayload[] | null {
       return parsed;
     }
 
-    if (parsed && typeof parsed === "object" && Array.isArray(parsed.drafts)) {
+    if (isDraftBatchModelPayload(parsed)) {
       return parsed.drafts;
     }
 
