@@ -499,6 +499,52 @@ body::after {
   text-decoration-color: currentColor;
 }
 
+.ai-markdown .markdown-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.95rem 0 1.05rem;
+  border: 1px solid var(--surface-outline);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--muted-surface) 94%, white 6%);
+}
+
+.ai-markdown table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: var(--color-ink-soft);
+}
+
+.ai-markdown th,
+.ai-markdown td {
+  min-width: 7.2rem;
+  max-width: 18rem;
+  padding: 0.58rem 0.74rem;
+  border-right: 1px solid var(--surface-outline);
+  border-bottom: 1px solid var(--surface-outline);
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.ai-markdown th {
+  background: color-mix(in srgb, var(--chip-soft) 72%, white 18%);
+  color: var(--color-sidebar-text-bright);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ai-markdown tr:last-child td {
+  border-bottom: none;
+}
+
+.ai-markdown th:last-child,
+.ai-markdown td:last-child {
+  border-right: none;
+}
+
 .inline-source-link {
   color: var(--color-amber-soft);
   text-decoration: underline;

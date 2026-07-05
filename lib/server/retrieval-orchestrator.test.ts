@@ -192,3 +192,30 @@ version: 1
     assert.ok(kbOnlyResult.kbHits.some((hit) => hit.id === "KB019"));
   });
 });
+
+test("mergeWikiSearchResults fuses keyword and vector results via RRF", async () => {
+  const { mergeWikiSearchResults } = await importRetrievalModule();
+
+  const page = (id: string) => ({ id } as never);
+  const keywordResults = [
+    { page: page("A"), score: 80, excerpt: "ka" },
+    { page: page("B"), score: 60, excerpt: "kb" },
+    { page: page("C"), score: 40, excerpt: "kc" },
+  ] as never;
+  const vectorResults = [
+    { page: page("D"), score: 30, excerpt: "vd" },
+    { page: page("A"), score: 25, excerpt: "va" },
+    { page: page("E"), score: 22, excerpt: "ve" },
+  ] as never;
+
+  const merged = mergeWikiSearchResults(keywordResults, vectorResults);
+  const ids = merged.map((item: { page: { id: string } }) => item.page.id);
+
+  // A 双路命中，RRF 最高，排第一；score 取两路原生最高，不再 +4。
+  assert.equal(ids[0], "A");
+  assert.equal(merged[0].score, 80);
+  // D 是向量路 rank-0，RRF 高于关键词路 rank-1 的 B，因此排在 B 前面——
+  // 这正是“向量召回的语义相关页不再被关键词分数压制”的关键行为。
+  assert.equal(ids[1], "D");
+  assert.ok(ids.indexOf("D") < ids.indexOf("B"));
+});

@@ -268,7 +268,9 @@ function buildRelatedWikiContext(
   ].join("\n");
 }
 
-function mergeWikiSearchResults(
+const WIKI_RRF_K = 6;
+
+export function mergeWikiSearchResults(
   keywordResults: Awaited<ReturnType<typeof searchWikiPages>>,
   vectorResults: Awaited<ReturnType<typeof searchCanonicalWikiPagesByVector>>
 ) {
@@ -278,28 +280,41 @@ function mergeWikiSearchResults(
       page: WikiPageSearchDocument;
       score: number;
       excerpt: string;
+      rrf: number;
     }
   >();
 
-  keywordResults.forEach((item) => {
-    merged.set(item.page.id, item);
-  });
-
-  vectorResults.forEach((item) => {
+  // 用 RRF（Reciprocal Rank Fusion）按排名融合两路结果，而不是直接比分数——
+  // 关键词分（n-gram 命中累加，动辄上百）和向量分（18~38）量纲不同，直接取 max+4
+  // 会让关键词路在排序上压倒一切，向量召回的语义相关页排不上来。RRF 只看每路的排名，
+  // 两路自然对等。score 字段保留“单路最高原生分”，供 selectWikiPages 的质量阈值复用。
+  const contribute = (
+    item: { page: WikiPageSearchDocument; score: number; excerpt: string },
+    rank: number
+  ) => {
+    const rrfContribution = 1 / (WIKI_RRF_K + rank + 1);
     const current = merged.get(item.page.id);
     if (!current) {
-      merged.set(item.page.id, item);
+      merged.set(item.page.id, {
+        page: item.page,
+        score: item.score,
+        excerpt: item.excerpt,
+        rrf: rrfContribution,
+      });
       return;
     }
 
-    merged.set(item.page.id, {
-      ...current,
-      score: Math.max(current.score, item.score) + 4,
-      excerpt: current.excerpt || item.excerpt,
-    });
-  });
+    current.rrf += rrfContribution;
+    current.score = Math.max(current.score, item.score);
+    if (!current.excerpt) current.excerpt = item.excerpt;
+  };
 
-  return Array.from(merged.values()).sort((left, right) => right.score - left.score);
+  keywordResults.forEach((item, rank) => contribute(item, rank));
+  vectorResults.forEach((item, rank) => contribute(item, rank));
+
+  return Array.from(merged.values()).sort(
+    (left, right) => right.rrf - left.rrf || right.score - left.score
+  );
 }
 
 function selectWikiPages(pages: Awaited<ReturnType<typeof searchWikiPages>>) {
@@ -418,25 +433,28 @@ export async function buildRetrievalOrchestratorResult(options: {
     diagnosis: options.diagnosis,
   });
   const shouldUseWiki = options.knowledgeMode === "wiki_first";
-  const keywordWikiSearchResults = shouldUseWiki
-    ? await searchWikiPages({
+  // 关键词与向量两路始终并行检索，再用 RRF 融合。
+  // 不再用“关键词命中不足才补向量”的兜底逻辑——那会让字面 n-gram 的假命中
+  // 把语义强相关但字面不重合的页面彻底屏蔽掉。未配置 RAG 时向量路返回空数组，
+  // 自动退化为纯关键词检索。
+  const keywordWikiPromise = shouldUseWiki
+    ? searchWikiPages({
         query: retrievalQuery,
         role: options.role,
         diagnosis: options.diagnosis,
         topK: 6,
       })
-    : [];
-  const keywordSelectedWikiPages = selectWikiPages(keywordWikiSearchResults);
-  const vectorWikiSearchResults =
-    shouldUseWiki && keywordSelectedWikiPages.length < 2
-      ? await searchCanonicalWikiPagesByVector({
-          query: retrievalQuery,
-          topK: 4,
-        }).catch((error) => {
-          console.error("Wiki vector retrieval error:", error);
-          return [];
-        })
-      : [];
+    : Promise.resolve([]);
+  const vectorWikiPromise = shouldUseWiki
+    ? searchCanonicalWikiPagesByVector({ query: retrievalQuery, topK: 6 }).catch((error) => {
+        console.error("Wiki vector retrieval error:", error);
+        return [];
+      })
+    : Promise.resolve([]);
+  const [keywordWikiSearchResults, vectorWikiSearchResults] = await Promise.all([
+    keywordWikiPromise,
+    vectorWikiPromise,
+  ]);
   const wikiSearchResults = mergeWikiSearchResults(keywordWikiSearchResults, vectorWikiSearchResults);
   const selectedWikiPages = selectWikiPages(wikiSearchResults);
   const valueRetrievalQuery = buildValueRetrievalQuery({
