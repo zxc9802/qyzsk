@@ -11,6 +11,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "test": "node --test --experimental-strip-types --import ./scripts/wiki/register-alias.mjs",
+    "eval:retrieval": "node --import ./scripts/wiki/register-alias.mjs --experimental-strip-types ./scripts/evals/run-retrieval-eval.ts",
     "lint": "eslint",
     "wiki:import-docx": "node --import ./scripts/wiki/register-alias.mjs --experimental-strip-types ./scripts/wiki/import-docx-batch.ts",
     "rag:reindex-wiki": "node --import ./scripts/wiki/register-alias.mjs --experimental-strip-types ./scripts/rag/reindex-wiki.ts",

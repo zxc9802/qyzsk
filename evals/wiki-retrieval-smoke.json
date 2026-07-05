@@ -1,42 +1,58 @@
 [
-  {
-    "id": "wiki-001",
-    "query": "判断一个产品值不值得做，应该看哪些维度？",
-    "expectedWikiIds": ["concepts/超级产品方法论"]
-  },
-  {
-    "id": "wiki-002",
-    "query": "短视频脚本应该先看人群还是卖点？",
-    "expectedWikiIds": ["concepts/内容电商方法论"]
-  },
-  {
-    "id": "wiki-003",
-    "query": "店铺最近不出单了，应该怎么排查？",
-    "expectedWikiIds": ["concepts/运营漏斗诊断"]
-  },
-  {
-    "id": "wiki-004",
-    "query": "我刚入职，问 AI 之前应该先准备什么信息？",
-    "expectedWikiIds": ["roles/新员工提问原则"]
-  },
-  {
-    "id": "wiki-005",
-    "query": "店铺不出单怎么办？",
-    "expectedWikiIds": ["concepts/运营漏斗诊断"]
-  },
-  {
-    "id": "wiki-006",
-    "query": "一直不出单",
-    "expectedWikiIds": ["concepts/运营漏斗诊断"]
-  },
-  {
-    "id": "wiki-007",
-    "query": "出单很少怎么办",
-    "expectedWikiIds": ["concepts/运营漏斗诊断"]
-  },
-  {
-    "id": "wiki-008",
-    "query": "今天天气怎么样",
-    "expectedWikiIds": []
-  }
+  { "id": "wiki-001", "query": "AI智能体设计原则是什么？", "role": "tech", "expectedWikiIds": ["concepts/AI智能体设计原则"] },
+  { "id": "wiki-002", "query": "公司内部做 AI 智能体要遵守哪些设计原则？", "role": "tech", "expectedWikiIds": ["concepts/AI智能体设计原则"] },
+  { "id": "wiki-003", "query": "公司定位与跨境战略是什么？", "role": "new", "expectedWikiIds": ["concepts/公司定位与跨境战略"] },
+  { "id": "wiki-004", "query": "跨境业务战略怎么理解？", "role": "management", "expectedWikiIds": ["concepts/公司定位与跨境战略"] },
+  { "id": "wiki-005", "query": "内容电商方法论怎么用？", "role": "video", "expectedWikiIds": ["concepts/内容电商方法论"] },
+  { "id": "wiki-006", "query": "短视频脚本应该先看人群还是卖点？", "role": "video", "expectedWikiIds": ["concepts/内容电商方法论"] },
+  { "id": "wiki-007", "query": "直播成交协同方法是什么？", "role": "live", "expectedWikiIds": ["concepts/直播成交协同方法"] },
+  { "id": "wiki-008", "query": "直播间转化低，人货场和话术怎么协同？", "role": "live", "expectedWikiIds": ["concepts/直播成交协同方法"] },
+  { "id": "wiki-009", "query": "短视频内容测试方法怎么做？", "role": "video", "expectedWikiIds": ["concepts/短视频内容测试方法"] },
+  { "id": "wiki-010", "query": "短视频播放低时怎么做内容测试？", "role": "video", "expectedWikiIds": ["concepts/短视频内容测试方法"] },
+  { "id": "wiki-011", "query": "经营原则与高标准具体是什么意思？", "role": "new", "expectedWikiIds": ["concepts/经营原则与高标准"] },
+  { "id": "wiki-012", "query": "公司说高标准和复盘纠错，具体怎么理解？", "role": "new", "expectedWikiIds": ["concepts/经营原则与高标准"] },
+  { "id": "wiki-013", "query": "判断一个产品值不值得做，应该看哪些维度？", "role": "product", "expectedWikiIds": ["concepts/超级产品方法论"] },
+  { "id": "wiki-014", "query": "超级产品方法论怎么判断需求和购买动机？", "role": "product", "expectedWikiIds": ["concepts/超级产品方法论"] },
+  { "id": "wiki-015", "query": "店铺最近不出单了，应该怎么排查？", "role": "operation", "expectedWikiIds": ["concepts/运营漏斗诊断"] },
+  { "id": "wiki-016", "query": "运营漏斗诊断要看哪些层级？", "role": "operation", "expectedWikiIds": ["concepts/运营漏斗诊断"] },
+  { "id": "wiki-017", "query": "项目分级与资源聚焦怎么判断？", "role": "management", "expectedWikiIds": ["concepts/项目分级与资源聚焦"] },
+  { "id": "wiki-018", "query": "项目优先级和资源投入怎么取舍？", "role": "management", "expectedWikiIds": ["concepts/项目分级与资源聚焦"] },
+  { "id": "wiki-019", "query": "TikTok店铺运营框架包括什么？", "role": "operation", "expectedWikiIds": ["entities/TikTok店铺运营框架"] },
+  { "id": "wiki-020", "query": "TikTok 商品卡店铺运营要看哪些指标？", "role": "operation", "expectedWikiIds": ["entities/TikTok店铺运营框架"] },
+  { "id": "wiki-021", "query": "市场与渠道判断怎么做？", "role": "product", "expectedWikiIds": ["entities/市场与渠道判断"] },
+  { "id": "wiki-022", "query": "产品进入新市场前，渠道适配怎么判断？", "role": "product", "expectedWikiIds": ["entities/市场与渠道判断"] },
+  { "id": "wiki-023", "query": "防晒项目打法怎么切入？", "role": "product", "expectedWikiIds": ["entities/防晒项目打法"] },
+  { "id": "wiki-024", "query": "防晒品类从选品到内容怎么打？", "role": "product", "expectedWikiIds": ["entities/防晒项目打法"] },
+  { "id": "wiki-025", "query": "TikTok商品卡与详情页优化怎么做？", "role": "operation", "expectedWikiIds": ["faq/TikTok商品卡与详情页优化"] },
+  { "id": "wiki-026", "query": "商品卡点击有了但不成交，详情页怎么优化？", "role": "operation", "expectedWikiIds": ["faq/TikTok商品卡与详情页优化"] },
+  { "id": "wiki-027", "query": "短视频脚本与放大量化怎么评估？", "role": "video", "expectedWikiIds": ["faq/短视频脚本与放大量化"] },
+  { "id": "wiki-028", "query": "短视频素材跑出来后怎么放量？", "role": "video", "expectedWikiIds": ["faq/短视频脚本与放大量化"] },
+  { "id": "wiki-029", "query": "达人合作评估与复盘怎么做？", "role": "bd", "expectedWikiIds": ["faq/达人合作评估与复盘"] },
+  { "id": "wiki-030", "query": "达人合作效果不好要怎么复盘？", "role": "bd", "expectedWikiIds": ["faq/达人合作评估与复盘"] },
+  { "id": "wiki-031", "query": "防晒用户异议与复购怎么处理？", "role": "operation", "expectedWikiIds": ["faq/防晒用户异议与复购"] },
+  { "id": "wiki-032", "query": "防晒用户担心油腻和复购低，怎么优化？", "role": "operation", "expectedWikiIds": ["faq/防晒用户异议与复购"] },
+  { "id": "wiki-033", "query": "人才分级与用人原则是什么？", "role": "management", "expectedWikiIds": ["roles/人才分级与用人原则"] },
+  { "id": "wiki-034", "query": "S级人才和用人原则怎么判断？", "role": "management", "expectedWikiIds": ["roles/人才分级与用人原则"] },
+  { "id": "wiki-035", "query": "岗位职责地图在哪里看？", "role": "new", "expectedWikiIds": ["roles/岗位职责地图"] },
+  { "id": "wiki-036", "query": "不同岗位职责边界怎么分？", "role": "management", "expectedWikiIds": ["roles/岗位职责地图"] },
+  { "id": "wiki-037", "query": "我刚入职，问 AI 之前应该先准备什么信息？", "role": "new", "expectedWikiIds": ["roles/新员工提问原则"] },
+  { "id": "wiki-038", "query": "新员工提问原则是什么？", "role": "new", "expectedWikiIds": ["roles/新员工提问原则"] },
+  { "id": "wiki-039", "query": "管理与复盘机制怎么执行？", "role": "management", "expectedWikiIds": ["roles/管理与复盘机制"] },
+  { "id": "wiki-040", "query": "团队复盘机制和纠错怎么落地？", "role": "management", "expectedWikiIds": ["roles/管理与复盘机制"] },
+  { "id": "wiki-041", "query": "管理和带教执行规范是什么？", "role": "management", "expectedWikiIds": ["roles/管理和带教执行规范"] },
+  { "id": "wiki-042", "query": "负责人带新人要按什么规范执行？", "role": "management", "expectedWikiIds": ["roles/管理和带教执行规范"] },
+  { "id": "wiki-043", "query": "达人建联SOP怎么做？", "role": "bd", "expectedWikiIds": ["roles/达人建联SOP"] },
+  { "id": "wiki-044", "query": "达人建联从筛选到合作怎么推进？", "role": "bd", "expectedWikiIds": ["roles/达人建联SOP"] },
+  { "id": "wiki-045", "query": "店铺不出单怎么办？", "role": "operation", "expectedWikiIds": ["concepts/运营漏斗诊断"] },
+  { "id": "wiki-046", "query": "一直不出单", "role": "operation", "expectedWikiIds": ["concepts/运营漏斗诊断"] },
+  { "id": "wiki-047", "query": "出单很少怎么办", "role": "operation", "expectedWikiIds": ["concepts/运营漏斗诊断"] },
+  { "id": "wiki-048", "query": "防晒项目用户异议多，内容和详情页怎么承接？", "role": "operation", "expectedWikiIds": ["faq/防晒用户异议与复购"] },
+  { "id": "wiki-049", "query": "TikTok 店铺不出单，商品卡详情页和运营漏斗都要看什么？", "role": "operation", "expectedWikiIds": ["concepts/运营漏斗诊断", "faq/TikTok商品卡与详情页优化"] },
+  { "id": "wiki-050", "query": "内容电商里短视频素材测试和放量怎么衔接？", "role": "video", "expectedWikiIds": ["concepts/内容电商方法论", "faq/短视频脚本与放大量化"] },
+  { "id": "wiki-051", "query": "达人合作推进不下去，建联和复盘分别看什么？", "role": "bd", "expectedWikiIds": ["roles/达人建联SOP", "faq/达人合作评估与复盘"] },
+  { "id": "wiki-052", "query": "新项目要不要继续投入，怎么结合项目分级和产品判断？", "role": "management", "expectedWikiIds": ["concepts/项目分级与资源聚焦", "concepts/超级产品方法论"] },
+  { "id": "wiki-053", "query": "直播间成交低，直播协同和防晒用户异议怎么一起看？", "role": "live", "expectedWikiIds": ["concepts/直播成交协同方法", "faq/防晒用户异议与复购"] },
+  { "id": "wiki-054", "query": "团队新人不会问 AI，管理者应该怎么带教？", "role": "management", "expectedWikiIds": ["roles/新员工提问原则", "roles/管理和带教执行规范"] },
+  { "id": "wiki-055", "query": "跨境防晒项目选择市场和渠道时怎么判断？", "role": "product", "expectedWikiIds": ["entities/市场与渠道判断", "entities/防晒项目打法"] },
+  { "id": "wiki-056", "query": "今天天气怎么样", "role": "new", "expectedWikiIds": [] }
 ]

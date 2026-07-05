@@ -18,13 +18,14 @@ function buildSemanticScore(similarity: number) {
 export async function searchCanonicalWikiPagesByVector(options: {
   query: string;
   topK?: number;
+  queryEmbedding?: number[];
 }): Promise<WikiSearchResult[]> {
   if (!isRagSearchConfigured()) return [];
 
   const query = options.query.trim();
   if (!query) return [];
 
-  const queryEmbedding = await embedText(query);
+  const queryEmbedding = options.queryEmbedding || await embedText(query);
   const config = getRagConfig();
   const chunkHits = await searchRagChunks({
     queryEmbedding,
@@ -66,13 +67,14 @@ export async function searchCanonicalWikiPagesByVector(options: {
 export async function searchKbEntriesByVector(options: {
   query: string;
   topK?: number;
+  queryEmbedding?: number[];
 }): Promise<{ entry: KnowledgeBaseEntry; score: number }[]> {
   if (!isRagSearchConfigured()) return [];
 
   const query = options.query.trim();
   if (!query) return [];
 
-  const queryEmbedding = await embedText(query);
+  const queryEmbedding = options.queryEmbedding || await embedText(query);
   const config = getRagConfig();
   const chunkHits = await searchRagChunks({
     queryEmbedding,
