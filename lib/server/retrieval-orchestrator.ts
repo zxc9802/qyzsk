@@ -10,6 +10,7 @@ import {
 } from "@/lib/server/kb-retrieval";
 import { embedText } from "@/lib/server/embeddings";
 import { buildConversationFileRetrieval } from "@/lib/server/file-retrieval";
+import { buildQueryRewrite } from "@/lib/server/query-rewrite";
 import { isRagSearchConfigured } from "@/lib/server/rag-config";
 import { searchCanonicalWikiPagesByVector, searchKbEntriesByVector } from "@/lib/server/rag-retrieval";
 import { searchWikiPages } from "@/lib/server/wiki-search";
@@ -134,6 +135,7 @@ function isContextDependentQuery(query: string) {
 
 function buildRetrievalQuery(options: {
   query: string;
+  role: string;
   history?: RetrievalHistoryMessage[];
   diagnosis?: QuestionDiagnosis;
 }) {
@@ -145,11 +147,21 @@ function buildRetrievalQuery(options: {
     .map((item) => item.content.trim())
     .filter(Boolean)
     .slice(-2);
+  const rewrite = buildQueryRewrite({
+    query: currentQuery,
+    role: options.role,
+    history: options.history,
+    diagnosis: options.diagnosis,
+  });
   const shouldUseHistory = isContextDependentQuery(currentQuery);
   const segments = [currentQuery, currentQuery];
 
   if (shouldUseHistory) {
     segments.push(...previousUserTurns);
+  }
+
+  if (rewrite.shouldRewrite) {
+    segments.push(rewrite.standaloneQuery, rewrite.vectorQuery, rewrite.keywordTerms.join(" "));
   }
 
   if (options.diagnosis?.selectedScope) {
@@ -476,6 +488,7 @@ export async function buildRetrievalOrchestratorResult(options: {
 }) {
   const retrievalQuery = buildRetrievalQuery({
     query: options.query,
+    role: options.role,
     history: options.history,
     diagnosis: options.diagnosis,
   });
