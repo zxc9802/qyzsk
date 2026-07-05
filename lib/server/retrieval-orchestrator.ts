@@ -10,6 +10,7 @@ import {
 } from "@/lib/server/kb-retrieval";
 import { embedText } from "@/lib/server/embeddings";
 import { buildConversationFileRetrieval } from "@/lib/server/file-retrieval";
+import { buildQueryRewrite } from "@/lib/server/query-rewrite";
 import { isRagSearchConfigured } from "@/lib/server/rag-config";
 import { searchCanonicalWikiPagesByVector, searchKbEntriesByVector } from "@/lib/server/rag-retrieval";
 import { searchWikiPages } from "@/lib/server/wiki-search";
@@ -19,11 +20,19 @@ import type { WikiRelation, WikiRelationType } from "@/lib/wiki-types";
 
 const MAX_TOTAL_KNOWLEDGE_CHARS = 12000;
 const MAX_WIKI_CONTEXT_CHARS = 7600;
-const MAX_WIKI_PAGES = 4;
+export const VECTOR_RETRIEVAL_LIMITS = {
+  wikiVectorChunks: 10,
+  kbVectorChunks: 12,
+  finalWikiPages: 4,
+  finalKbEntries: 10,
+} as const;
+
+const MAX_WIKI_VECTOR_CHUNKS = VECTOR_RETRIEVAL_LIMITS.wikiVectorChunks;
+const MAX_WIKI_PAGES = VECTOR_RETRIEVAL_LIMITS.finalWikiPages;
 const MAX_WIKI_RELATION_SUMMARIES = 3;
 const MAX_KB_BACKFILL_ENTRIES = 3;
-const MAX_KB_VECTOR_ENTRIES = 4;
-const MAX_KB_ENTRIES = 10;
+const MAX_KB_VECTOR_ENTRIES = VECTOR_RETRIEVAL_LIMITS.kbVectorChunks;
+const MAX_KB_ENTRIES = VECTOR_RETRIEVAL_LIMITS.finalKbEntries;
 const MAX_VALUE_WIKI_PAGES = 1;
 const MAX_VALUE_KB_ENTRIES = 2;
 const WIKI_SCORE_THRESHOLD = 16;
@@ -126,6 +135,7 @@ function isContextDependentQuery(query: string) {
 
 function buildRetrievalQuery(options: {
   query: string;
+  role: string;
   history?: RetrievalHistoryMessage[];
   diagnosis?: QuestionDiagnosis;
 }) {
@@ -137,11 +147,21 @@ function buildRetrievalQuery(options: {
     .map((item) => item.content.trim())
     .filter(Boolean)
     .slice(-2);
+  const rewrite = buildQueryRewrite({
+    query: currentQuery,
+    role: options.role,
+    history: options.history,
+    diagnosis: options.diagnosis,
+  });
   const shouldUseHistory = isContextDependentQuery(currentQuery);
   const segments = [currentQuery, currentQuery];
 
   if (shouldUseHistory) {
     segments.push(...previousUserTurns);
+  }
+
+  if (rewrite.shouldRewrite) {
+    segments.push(rewrite.standaloneQuery, rewrite.vectorQuery, rewrite.keywordTerms.join(" "));
   }
 
   if (options.diagnosis?.selectedScope) {
@@ -468,6 +488,7 @@ export async function buildRetrievalOrchestratorResult(options: {
 }) {
   const retrievalQuery = buildRetrievalQuery({
     query: options.query,
+    role: options.role,
     history: options.history,
     diagnosis: options.diagnosis,
   });
@@ -494,7 +515,11 @@ export async function buildRetrievalOrchestratorResult(options: {
   const vectorWikiPromise = shouldUseWiki
     ? queryEmbeddingPromise.then((queryEmbedding) => {
         if (!queryEmbedding) return [];
-        return searchCanonicalWikiPagesByVector({ query: retrievalQuery, topK: 6, queryEmbedding }).catch((error) => {
+        return searchCanonicalWikiPagesByVector({
+          query: retrievalQuery,
+          topK: MAX_WIKI_VECTOR_CHUNKS,
+          queryEmbedding,
+        }).catch((error) => {
           console.error("Wiki vector retrieval error:", error);
           return [];
         });
