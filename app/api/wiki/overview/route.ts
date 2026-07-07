@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
 import {
-  getWikiAdminStats,
+  buildWikiStats,
   listAdminVisiblePublishedPages,
   listWikiDrafts,
   listWikiSourceRecords,
@@ -17,12 +17,12 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [stats, drafts, sources, pages] = await Promise.all([
-      getWikiAdminStats(),
+    const [drafts, sources, pages] = await Promise.all([
       listWikiDrafts(),
       listWikiSourceRecords(),
       listAdminVisiblePublishedPages(),
     ]);
+    const stats = buildWikiStats(pages, drafts, sources);
 
     return new Response(
       JSON.stringify({

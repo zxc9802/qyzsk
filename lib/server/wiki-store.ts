@@ -436,9 +436,7 @@ export async function listPublishedPages(): Promise<WikiPageSearchDocument[]> {
   if (cachedMeta?.fingerprint === fingerprint) {
     const cachedPages = await readJson<WikiPageSearchDocument[] | null>(INDEX_CACHE_PATH, null);
     if (cachedPages) {
-      const normalizedCachedPages = cachedPages.map((page) => normalizePublishedSearchDocument(page));
-      await writeJson(INDEX_CACHE_PATH, normalizedCachedPages);
-      return normalizedCachedPages;
+      return cachedPages.map((page) => normalizePublishedSearchDocument(page));
     }
   }
 
@@ -800,6 +798,15 @@ export async function getWikiAdminStats(): Promise<WikiStats> {
     listWikiDrafts(),
     listWikiSourceRecords(),
   ]);
+
+  return buildWikiStats(publishedPages, drafts, sources);
+}
+
+export function buildWikiStats(
+  publishedPages: Pick<WikiPage, "updatedAt">[],
+  drafts: Pick<WikiDraft, "status">[],
+  sources: unknown[]
+): WikiStats {
 
   return {
     publishedPages: publishedPages.length,

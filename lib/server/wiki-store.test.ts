@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -212,5 +213,41 @@ version: 1
     assert.deepEqual(adminPages.map((page) => page.id), ["concepts/新增方法"]);
     assert.equal(adminStats.publishedPages, 1);
     assert.equal(adminStats.lastPublishedAt, "2026-07-07");
+  });
+});
+
+test("listPublishedPages does not rewrite the published cache when files are unchanged", async () => {
+  await withTempCwd(async () => {
+    await mkdir(path.join(process.cwd(), "wiki", "concepts"), { recursive: true });
+    await writeFile(
+      path.join(process.cwd(), "wiki", "concepts", "main.md"),
+      `---
+id: "concepts/main"
+title: "主页面"
+category: "concepts"
+summary: "主页面摘要"
+roles: ["全员"]
+source_ids: ["KB001"]
+related_pages: []
+created_at: "2026-04-22"
+updated_at: "2026-04-22"
+version: 1
+---
+
+# 主页面
+`,
+      "utf8"
+    );
+
+    const { listPublishedPages } = await importStoreModule();
+    await listPublishedPages();
+
+    const cachePath = path.join(process.cwd(), ".kb-chat-data", "wiki", "cache", "published-index.json");
+    const initialMtime = (await stat(cachePath)).mtimeMs;
+
+    await sleep(20);
+    await listPublishedPages();
+
+    assert.equal((await stat(cachePath)).mtimeMs, initialMtime);
   });
 });
