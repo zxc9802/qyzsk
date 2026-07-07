@@ -150,3 +150,67 @@ version: 1
     assert.deepEqual(pages[0].relatedPages, ["concepts/main"]);
   });
 });
+
+test("admin-visible published pages hide seeded pages without removing them from retrieval", async () => {
+  await withTempCwd(async () => {
+    await mkdir(path.join(process.cwd(), "wiki", "concepts"), { recursive: true });
+
+    await writeFile(
+      path.join(process.cwd(), "wiki", "concepts", "AI智能体设计原则.md"),
+      `---
+id: "concepts/AI智能体设计原则"
+title: "AI智能体设计原则"
+category: "concepts"
+summary: "历史内置知识"
+roles: ["全员"]
+source_ids: ["KB066"]
+related_pages: []
+created_at: "2026-04-08"
+updated_at: "2026-04-08"
+version: 1
+---
+
+# AI智能体设计原则
+`,
+      "utf8"
+    );
+
+    await writeFile(
+      path.join(process.cwd(), "wiki", "concepts", "新增方法.md"),
+      `---
+id: "concepts/新增方法"
+title: "新增方法"
+category: "concepts"
+summary: "用户新增知识"
+roles: ["全员"]
+source_ids: ["KB999"]
+related_pages: []
+created_at: "2026-07-07"
+updated_at: "2026-07-07"
+version: 1
+---
+
+# 新增方法
+`,
+      "utf8"
+    );
+
+    const {
+      getWikiAdminStats,
+      listAdminVisiblePublishedPages,
+      listPublishedPages,
+    } = await importStoreModule();
+
+    const retrievalPages = await listPublishedPages();
+    const adminPages = await listAdminVisiblePublishedPages();
+    const adminStats = await getWikiAdminStats();
+
+    assert.deepEqual(
+      retrievalPages.map((page) => page.id).sort(),
+      ["concepts/AI智能体设计原则", "concepts/新增方法"]
+    );
+    assert.deepEqual(adminPages.map((page) => page.id), ["concepts/新增方法"]);
+    assert.equal(adminStats.publishedPages, 1);
+    assert.equal(adminStats.lastPublishedAt, "2026-07-07");
+  });
+});

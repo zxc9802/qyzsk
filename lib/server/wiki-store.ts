@@ -28,6 +28,30 @@ const WIKI_SCHEMA_PATH = path.join(PUBLISHED_ROOT, "_schema.md");
 const WIKI_INDEX_PATH = path.join(PUBLISHED_ROOT, "_index.md");
 
 const WIKI_CATEGORIES: WikiCategory[] = ["concepts", "entities", "roles", "faq", "synthesis"];
+const SEEDED_WIKI_PAGE_IDS = new Set([
+  "concepts/AI智能体设计原则",
+  "concepts/公司定位与跨境战略",
+  "concepts/内容电商方法论",
+  "concepts/直播成交协同方法",
+  "concepts/短视频内容测试方法",
+  "concepts/经营原则与高标准",
+  "concepts/超级产品方法论",
+  "concepts/运营漏斗诊断",
+  "concepts/项目分级与资源聚焦",
+  "entities/TikTok店铺运营框架",
+  "entities/市场与渠道判断",
+  "entities/防晒项目打法",
+  "faq/TikTok商品卡与详情页优化",
+  "faq/短视频脚本与放大量化",
+  "faq/达人合作评估与复盘",
+  "faq/防晒用户异议与复购",
+  "roles/人才分级与用人原则",
+  "roles/岗位职责地图",
+  "roles/新员工提问原则",
+  "roles/管理与复盘机制",
+  "roles/管理和带教执行规范",
+  "roles/达人建联SOP",
+]);
 
 const DEFAULT_SCHEMA = `# Wiki Schema
 
@@ -432,6 +456,11 @@ export async function listPublishedWikiIds(): Promise<string[]> {
   return pages.map((page) => page.id);
 }
 
+export async function listAdminVisiblePublishedPages(): Promise<WikiPageSearchDocument[]> {
+  const pages = await listPublishedPages();
+  return pages.filter((page) => !SEEDED_WIKI_PAGE_IDS.has(page.id));
+}
+
 export async function readPublishedPage(pageId: string): Promise<WikiPageSearchDocument | null> {
   await ensureWikiWorkspace();
   const filePath = publishedFilePath(pageId);
@@ -748,6 +777,26 @@ export async function upsertWikiDraftByPageId(
 export async function getWikiStats(): Promise<WikiStats> {
   const [publishedPages, drafts, sources] = await Promise.all([
     listPublishedPages(),
+    listWikiDrafts(),
+    listWikiSourceRecords(),
+  ]);
+
+  return {
+    publishedPages: publishedPages.length,
+    draftCount: drafts.filter((draft) => draft.status === "draft").length,
+    rawSourceCount: sources.length,
+    lastPublishedAt:
+      publishedPages.length > 0
+        ? publishedPages
+            .map((page) => page.updatedAt)
+            .sort((left, right) => right.localeCompare(left))[0]
+        : null,
+  };
+}
+
+export async function getWikiAdminStats(): Promise<WikiStats> {
+  const [publishedPages, drafts, sources] = await Promise.all([
+    listAdminVisiblePublishedPages(),
     listWikiDrafts(),
     listWikiSourceRecords(),
   ]);
