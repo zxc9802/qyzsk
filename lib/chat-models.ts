@@ -61,7 +61,7 @@ export const CHAT_MODELS: ChatModelOption[] = [
     label: "GPT-5.5",
     shortLabel: "GPT-5.5",
     provider: "yunwu",
-    apiModel: "gpt-5.4",
+    apiModel: "gpt-5.6-luna",
     description: "走 Yunwu 的 GPT-5.5",
   },
 ];

@@ -13,13 +13,13 @@ test("primary chat model is displayed and routed as Claude Opus 4.6", () => {
   assert.equal(primary.apiKeyEnvName, "YUNWU_CLAUDE_CHAT_API_KEY");
 });
 
-test("GPT selection displays GPT-5.5 while retaining its API model", () => {
+test("GPT selection routes to GPT-5.6 Luna while retaining its display label", () => {
   const gpt = getChatModelOption("yunwu-gpt-5.4");
 
   assert.equal(gpt.label, "GPT-5.5");
   assert.equal(gpt.shortLabel, "GPT-5.5");
   assert.equal(gpt.description, "走 Yunwu 的 GPT-5.5");
-  assert.equal(gpt.apiModel, "gpt-5.4");
+  assert.equal(gpt.apiModel, "gpt-5.6-luna");
 });
 
 test("other chat model labels stay unchanged", () => {
