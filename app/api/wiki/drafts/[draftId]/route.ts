@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
 import { applyWikiDraftAction, type WikiDraftAction } from "@/lib/server/wiki-review";
+import { deleteWikiDraft } from "@/lib/server/wiki-store";
 
 export const runtime = "nodejs";
 
@@ -33,6 +34,38 @@ export async function PATCH(
 
     console.error("Wiki draft update error:", error);
     return new Response(JSON.stringify({ error: "更新 Wiki 草稿失败。" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+}
+
+export async function DELETE(
+  req: NextRequest,
+  context: { params: Promise<{ draftId: string }> }
+) {
+  try {
+    await assertWikiAdminAccess(req);
+  } catch (error) {
+    return wikiAdminAuthErrorResponse(error, req);
+  }
+
+  try {
+    const { draftId } = await context.params;
+    await deleteWikiDraft(draftId);
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "Wiki 草稿不存在。") {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    console.error("Wiki draft delete error:", error);
+    return new Response(JSON.stringify({ error: "删除 Wiki 草稿失败。" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });

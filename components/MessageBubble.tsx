@@ -1,6 +1,6 @@
 "use client";
 
-import type { KnowledgeBaseHit, QuestionDiagnosis, RetrievalSourceHit } from "@/lib/types";
+import type { ChatMediaItem, KnowledgeBaseHit, QuestionDiagnosis, RetrievalSourceHit } from "@/lib/types";
 import { getChatModelOption } from "@/lib/chat-models";
 import { getWikiCategoryLabel } from "@/lib/wiki-category-labels";
 import { Message } from "@/lib/types";
@@ -86,6 +86,44 @@ function renderSourceCategoryLabel(hit: RetrievalSourceHit) {
   if (!hit.category) return "";
   if (hit.type === "wiki") return getWikiCategoryLabel(hit.category);
   return hit.category;
+}
+
+function renderMediaItems(items: ChatMediaItem[]) {
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mt-4 grid gap-3">
+      {items.map((item) => (
+        <figure
+          key={`${item.source}-${item.id}`}
+          className="overflow-hidden rounded-[20px] border"
+          style={{
+            background: "var(--muted-surface)",
+            borderColor: "var(--surface-outline)",
+          }}
+        >
+          {item.kind === "image" ? (
+            <img
+              src={item.url}
+              alt={item.name}
+              className="max-h-[420px] w-full object-contain"
+            />
+          ) : (
+            <video
+              src={item.url}
+              poster={item.posterUrl}
+              controls
+              className="max-h-[420px] w-full bg-black"
+            />
+          )}
+          <figcaption className="px-4 py-3 text-[12px] leading-6" style={{ color: "var(--color-ink-soft)" }}>
+            {item.name}
+            {item.caption ? ` · ${item.caption}` : ""}
+          </figcaption>
+        </figure>
+      ))}
+    </div>
+  );
 }
 
 function renderSourcePanel(hits: RetrievalSourceHit[]) {
@@ -229,6 +267,7 @@ export default function MessageBubble({
     : [];
   const localSourceHits = allSourceHits.filter((hit) => hit.type !== "web");
   const webSourceHits = allSourceHits.filter((hit) => hit.type === "web");
+  const mediaItems = !isUser ? message.mediaItems || [] : [];
 
   if (isUser) {
     return (
@@ -278,9 +317,10 @@ export default function MessageBubble({
               boxShadow: "var(--card-shadow-strong)",
             }}
           >
-            {displayContent || localSourceHits.length > 0 || webSourceHits.length > 0 || questionDiagnosis ? (
+            {displayContent || localSourceHits.length > 0 || webSourceHits.length > 0 || mediaItems.length > 0 || questionDiagnosis ? (
               <>
                 {renderSourcePanel(localSourceHits)}
+                {renderMediaItems(mediaItems)}
                 {questionDiagnosis ? renderQuestionDiagnosisPanel(questionDiagnosis) : null}
                 {displayContent ? (
                   renderStructuredResponse(displayContent, isStreaming, webSourceHits)
@@ -321,6 +361,7 @@ export default function MessageBubble({
             ) : (
               <>
                 {renderSourcePanel(localSourceHits)}
+                {renderMediaItems(mediaItems)}
                 {renderWebCitationChips(webSourceHits)}
               </>
             )}

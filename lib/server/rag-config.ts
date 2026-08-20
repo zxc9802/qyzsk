@@ -49,6 +49,13 @@ export interface RagConfig {
   chunkOverlap: number;
 }
 
+export interface UploadEmbeddingConfig {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+  dimensions: number;
+}
+
 export function getRagConfig(): RagConfig {
   return {
     enabled: parseBoolean(process.env.RAG_ENABLED, false),
@@ -86,4 +93,21 @@ export function getRagDisabledReason() {
   if (!config.openAiApiKey) return "RAG_OPENAI_API_KEY 或 OPENAI_API_KEY 未配置";
   if (!config.openAiBaseUrl) return "RAG_OPENAI_BASE_URL 未配置";
   return null;
+}
+
+export function getUploadEmbeddingConfig(): UploadEmbeddingConfig {
+  return {
+    apiUrl: (
+      process.env.UPLOAD_EMBEDDING_URL ||
+      "https://api.openlux.ai/v1beta/models/gemini-embedding-2-preview:generateContent"
+    ).trim(),
+    apiKey: (process.env.UPLOAD_EMBEDDING_API_KEY || "").trim(),
+    model: (process.env.UPLOAD_EMBEDDING_MODEL || "gemini-embedding-2-preview").trim(),
+    dimensions: parseInteger(process.env.UPLOAD_EMBEDDING_DIMENSIONS, 1536, { min: 128, max: 3072 }),
+  };
+}
+
+export function isUploadEmbeddingConfigured() {
+  const config = getUploadEmbeddingConfig();
+  return Boolean(config.apiUrl && config.apiKey);
 }

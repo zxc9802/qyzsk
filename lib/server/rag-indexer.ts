@@ -1,7 +1,7 @@
 import { embedTexts } from "@/lib/server/embeddings";
 import { buildWikiPageRagChunks, buildKbEntryRagChunks } from "@/lib/server/rag-chunking";
-import { getRagDisabledReason, isRagSearchConfigured } from "@/lib/server/rag-config";
-import { replaceRagChunksForSource } from "@/lib/server/rag-store";
+import { getRagDisabledReason, isRagDatabaseConfigured, isRagSearchConfigured } from "@/lib/server/rag-config";
+import { deleteRagChunksForSource, replaceRagChunksForSource } from "@/lib/server/rag-store";
 import { getKnowledgeBaseEntries } from "@/lib/server/kb-retrieval";
 import type { WikiPage } from "@/lib/wiki-types";
 
@@ -30,6 +30,24 @@ export async function syncPublishedWikiPageToRag(page: WikiPage) {
   return {
     skipped: false,
     chunkCount: chunks.length,
+  };
+}
+
+export async function removePublishedWikiPageFromRag(pageId: string) {
+  if (!isRagDatabaseConfigured()) {
+    return {
+      skipped: true,
+      reason: "DATABASE_URL 未配置",
+    };
+  }
+
+  await deleteRagChunksForSource({
+    sourceType: "wiki_page",
+    sourceId: pageId,
+  });
+
+  return {
+    skipped: false,
   };
 }
 

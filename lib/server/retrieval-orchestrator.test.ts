@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import type { KnowledgeBaseHit, RetrievalSourceHit } from "@/lib/types";
+import type { ChatMediaItem, KnowledgeBaseHit, RetrievalSourceHit } from "@/lib/types";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -114,6 +114,7 @@ roles: ["运营岗"]
 source_ids: ["KB130"]
 related_pages: []
 relations: []
+media: [{"id":"shop-dashboard","kind":"image","name":"店铺后台.png","mimeType":"image/png","size":2048,"summary":"店铺后台截图"}]
 created_at: "2026-04-22"
 updated_at: "2026-04-22"
 version: 1
@@ -172,6 +173,9 @@ version: 1
     assert.ok(result.sourceHits.some((hit: RetrievalSourceHit) => hit.id === "concepts/values"));
     assert.match(result.knowledgeContext, /店铺不出单要先分层排查/);
     assert.match(result.knowledgeContext, /高标准的人会主动补齐信息/);
+    assert.ok(
+      result.mediaItems.some((item: ChatMediaItem) => item.id === "shop-dashboard" && item.url === "/api/wiki/media/shop-dashboard")
+    );
 
     const valueHitCount = (
       await buildRetrievalOrchestratorResult({
@@ -292,6 +296,7 @@ version: 1
     const previousEnv = {
       RAG_ENABLED: process.env.RAG_ENABLED,
       RAG_OPENAI_API_KEY: process.env.RAG_OPENAI_API_KEY,
+      UPLOAD_EMBEDDING_API_KEY: process.env.UPLOAD_EMBEDDING_API_KEY,
       DATABASE_URL: process.env.DATABASE_URL,
     };
     const previousFetch = globalThis.fetch;
@@ -300,9 +305,12 @@ version: 1
 
     process.env.RAG_ENABLED = "true";
     process.env.RAG_OPENAI_API_KEY = "test-key";
+    process.env.UPLOAD_EMBEDDING_API_KEY = "upload-key";
     process.env.DATABASE_URL = "postgres://127.0.0.1:1/kb_chat_test";
-    globalThis.fetch = (async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
       embeddingRequestCount += 1;
+      assert.match(String(input), /\/embeddings$/);
+      assert.doesNotMatch(String(input), /generateContent/);
       return new Response(
         JSON.stringify({
           data: [{ embedding: Array.from({ length: 1024 }, () => 0.01) }],
@@ -332,6 +340,8 @@ version: 1
       else process.env.RAG_ENABLED = previousEnv.RAG_ENABLED;
       if (previousEnv.RAG_OPENAI_API_KEY === undefined) delete process.env.RAG_OPENAI_API_KEY;
       else process.env.RAG_OPENAI_API_KEY = previousEnv.RAG_OPENAI_API_KEY;
+      if (previousEnv.UPLOAD_EMBEDDING_API_KEY === undefined) delete process.env.UPLOAD_EMBEDDING_API_KEY;
+      else process.env.UPLOAD_EMBEDDING_API_KEY = previousEnv.UPLOAD_EMBEDDING_API_KEY;
       if (previousEnv.DATABASE_URL === undefined) delete process.env.DATABASE_URL;
       else process.env.DATABASE_URL = previousEnv.DATABASE_URL;
       globalThis.fetch = previousFetch;

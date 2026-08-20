@@ -139,10 +139,22 @@ export function inferExtension(fileName: string, mimeType: string): string {
       return ".docx";
     case "video/mp4":
       return ".mp4";
+    case "video/webm":
+      return ".webm";
+    case "video/quicktime":
+      return ".mov";
     case "image/png":
       return ".png";
     case "image/jpeg":
       return ".jpg";
+    case "image/webp":
+      return ".webp";
+    case "image/gif":
+      return ".gif";
+    case "text/plain":
+      return ".txt";
+    case "text/markdown":
+      return ".md";
     default:
       return "";
   }

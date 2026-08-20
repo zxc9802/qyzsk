@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { deriveRelatedPageIds, normalizeWikiRelations } from "@/lib/wiki-relations";
 import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
-import { readPublishedPage, updatePublishedPage } from "@/lib/server/wiki-store";
+import { deletePublishedPage, readPublishedPage, updatePublishedPage } from "@/lib/server/wiki-store";
 
 type PageUpdatePayload = {
   title?: string;
@@ -65,6 +65,39 @@ export async function PATCH(
   } catch (error) {
     console.error("Wiki page update error:", error);
     return new Response(JSON.stringify({ error: "更新 Wiki 页面失败。" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+}
+
+export async function DELETE(
+  req: NextRequest,
+  context: { params: Promise<{ pageId: string[] }> }
+) {
+  try {
+    await assertWikiAdminAccess(req);
+  } catch (error) {
+    return wikiAdminAuthErrorResponse(error, req);
+  }
+
+  try {
+    const { pageId } = await context.params;
+    const resolvedPageId = Array.isArray(pageId) ? pageId.join("/") : "";
+    await deletePublishedPage(resolvedPageId);
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "Wiki 页面不存在。") {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    console.error("Wiki page delete error:", error);
+    return new Response(JSON.stringify({ error: "删除 Wiki 页面失败。" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });

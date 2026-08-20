@@ -11,6 +11,8 @@ import {
   FILE_LIMITS,
   formatBytes,
   inferUploadKind,
+  normalizeUploadMimeType,
+  UPLOAD_FILE_ACCEPT_LABEL,
 } from "@/lib/server/file-processing";
 import {
   cancelConversationProcessing,
@@ -45,18 +47,7 @@ function getFileId(request: NextRequest): string {
 }
 
 function normalizeMimeType(file: File): string {
-  if (file.type) return file.type;
-
-  const lower = file.name.toLowerCase();
-  if (lower.endsWith(".pdf")) return "application/pdf";
-  if (lower.endsWith(".docx")) {
-    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  }
-  if (lower.endsWith(".doc")) return "application/msword";
-  if (lower.endsWith(".mp4")) return "video/mp4";
-  if (lower.endsWith(".png")) return "image/png";
-  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-  return "application/octet-stream";
+  return normalizeUploadMimeType(file.name, file.type);
 }
 
 export async function GET(req: NextRequest) {
@@ -105,7 +96,7 @@ export async function POST(req: NextRequest) {
 
     if (!kind) {
       return json({
-        error: `暂不支持 ${file.name} 这个文件类型。当前 MVP 仅支持 PDF / Word / MP4 / PNG / JPG。`,
+        error: `暂不支持 ${file.name} 这个文件类型。当前支持 ${UPLOAD_FILE_ACCEPT_LABEL}。`,
       }, 400);
     }
 

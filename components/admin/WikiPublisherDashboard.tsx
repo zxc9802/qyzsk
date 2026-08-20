@@ -3,9 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { DEFAULT_WIKI_DRAFT_MODEL_ID } from "@/lib/chat-models";
 import { extractApiErrorMessage, readJsonSafely, redirectToMainAppIfNeeded } from "@/lib/client/api-response";
+import { postFormData } from "@/lib/client/upload-form";
+import { inspectUploadFile } from "@/lib/upload-accept";
 import type { AppViewer } from "@/lib/client/app-session";
-import type { WikiDraft } from "@/lib/wiki-types";
-import { AdminErrorBanner, AdminPageHeader, formatDate } from "@/components/admin/WikiAdminShared";
+import type { WikiDraft, WikiSourceRecord } from "@/lib/wiki-types";
+import KnowledgeFilePicker from "@/components/KnowledgeFilePicker";
+import WikiMediaGallery from "@/components/admin/WikiMediaGallery";
+import { AdminErrorBanner, AdminPageHeader, formatDate, formatSourceStatusLabel } from "@/components/admin/WikiAdminShared";
 
 type PublisherOverviewPayload = {
   user?: AppViewer | null;
@@ -18,6 +22,7 @@ type PublisherOverviewPayload = {
     lastUpdatedAt?: string | null;
   };
   drafts?: WikiDraft[];
+  sources?: WikiSourceRecord[];
   error?: string;
   message?: string;
   redirectUrl?: string;
@@ -59,11 +64,16 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
   const [error, setError] = useState<string | null>(null);
   const [ingestTitle, setIngestTitle] = useState("");
   const [ingestContent, setIngestContent] = useState("");
+  const [ingestFiles, setIngestFiles] = useState<File[]>([]);
   const [submittingIngest, setSubmittingIngest] = useState(false);
+  const [ingestProgress, setIngestProgress] = useState<number | null>(null);
+  const [ingestNotice, setIngestNotice] = useState<string | null>(null);
 
-  const loadOverview = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const loadOverview = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setLoading(true);
+      setError(null);
+    }
 
     try {
       const response = await fetch("/api/wiki/publisher/overview", {
@@ -81,15 +91,29 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
 
       setOverview(payload || null);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "读取知识发布台失败");
+      if (!options?.silent) {
+        setError(requestError instanceof Error ? requestError.message : "读取知识发布台失败");
+      }
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
+
+  const drafts = overview?.drafts || [];
+  const sources = overview?.sources || [];
+  const hasProcessingSources = sources.some((source) => source.status === "processing");
+
+  useEffect(() => {
+    if (!hasProcessingSources) return;
+    const intervalId = window.setInterval(() => {
+      void loadOverview({ silent: true });
+    }, 2500);
+    return () => window.clearInterval(intervalId);
+  }, [hasProcessingSources, loadOverview]);
 
   const drafts = overview?.drafts || [];
   const stats = overview?.stats || {
@@ -102,40 +126,45 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
   };
 
   async function submitIngest() {
-    if (!ingestContent.trim()) {
-      setError("请先填写要发布的候选知识内容。");
+    if (!ingestContent.trim() && ingestFiles.length === 0) {
+      setError("请先填写候选知识内容，或上传文档、图片、视频。");
+      return;
+    }
+
+    const rejected = ingestFiles.map(inspectUploadFile).filter((item) => !item.ok);
+    if (rejected.length > 0) {
+      setError(rejected.map((item) => (!item.ok ? item.error : "")).join("\n"));
       return;
     }
 
     setSubmittingIngest(true);
+    setIngestProgress(ingestFiles.length > 0 ? 0 : null);
     setError(null);
+    setIngestNotice(null);
 
     try {
-      const response = await fetch("/api/wiki/ingest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: ingestTitle.trim(),
-          content: ingestContent.trim(),
-          modelId: DEFAULT_WIKI_DRAFT_MODEL_ID,
-        }),
-      });
-      const payload = await readJsonSafely<{ error?: string; message?: string; redirectUrl?: string }>(response);
-      if (redirectToMainAppIfNeeded(response, payload)) {
-        return;
-      }
+      const formData = new FormData();
+      formData.append("title", ingestTitle.trim());
+      formData.append("content", ingestContent.trim());
+      formData.append("modelId", DEFAULT_WIKI_DRAFT_MODEL_ID);
+      ingestFiles.forEach((file) => formData.append("files", file));
 
-      if (!response.ok) {
-        throw new Error(extractApiErrorMessage(payload, "提交候选知识失败"));
-      }
+      const payload = await postFormData<{ message?: string }>({
+        url: "/api/wiki/ingest",
+        formData,
+        onProgress: ingestFiles.length > 0 ? setIngestProgress : undefined,
+      });
 
       setIngestTitle("");
       setIngestContent("");
-      await loadOverview();
+      setIngestFiles([]);
+      setIngestNotice(payload.message || "候选知识已提交，正在后台处理。");
+      await loadOverview({ silent: true });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "提交候选知识失败");
     } finally {
       setSubmittingIngest(false);
+      setIngestProgress(null);
     }
   }
 
@@ -150,6 +179,18 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
         />
 
         <AdminErrorBanner error={error} />
+        {ingestNotice ? (
+          <div
+            className="rounded-[22px] border px-4 py-4 text-sm"
+            style={{
+              borderColor: "var(--surface-outline-accent)",
+              background: "var(--chip-soft)",
+              color: "var(--color-sidebar-text-bright)",
+            }}
+          >
+            {ingestNotice}
+          </div>
+        ) : null}
 
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(340px,0.92fr)]">
           <section className="panel-surface rounded-[28px] px-5 py-5 md:px-7">
@@ -180,7 +221,7 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
               <textarea
                 value={ingestContent}
                 onChange={(event) => setIngestContent(event.target.value)}
-                placeholder="把你的经验、复盘、案例或方法论贴在这里。提交后会先显示为“正在审核”。"
+                placeholder="把你的经验、复盘、案例或方法论贴在这里，也可以直接上传文档、图片或视频。提交后会先显示为“正在审核”。"
                 rows={12}
                 className="rounded-[22px] border px-4 py-4 text-sm leading-7 outline-none"
                 style={{
@@ -188,6 +229,11 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
                   background: "var(--surface-command)",
                   color: "var(--color-sidebar-text-bright)",
                 }}
+              />
+              <KnowledgeFilePicker
+                files={ingestFiles}
+                onChange={setIngestFiles}
+                disabled={submittingIngest}
               />
               <div className="flex justify-end">
                 <button
@@ -200,7 +246,11 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
                     opacity: submittingIngest ? 0.6 : 1,
                   }}
                 >
-                  {submittingIngest ? "正在生成候选草稿..." : "提交候选知识"}
+                  {submittingIngest
+                    ? ingestProgress != null
+                      ? `上传中 ${ingestProgress}%`
+                      : "已提交，正在排队..."
+                    : "提交候选知识"}
                 </button>
               </div>
             </div>
@@ -235,7 +285,7 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
             }}>
               {loading
                 ? "正在读取你的发布状态..."
-                : drafts.length === 0
+                : drafts.length === 0 && sources.length === 0
                   ? "你还没有提交候选知识。第一次发布后，这里会显示审核提醒。"
                   : "你最近提交的候选知识状态已经同步完成，下面可以继续查看明细。"}
             </div>
@@ -267,12 +317,46 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
             </button>
           </div>
 
-          {drafts.length === 0 ? (
+          {drafts.length === 0 && sources.length === 0 ? (
             <div className="mt-5 soft-panel rounded-[24px] px-5 py-6 text-sm" style={{ color: "var(--color-ink-soft)" }}>
               当前还没有你自己提交的候选知识。
             </div>
           ) : (
             <div className="mt-5 grid gap-4 xl:grid-cols-2">
+              {sources
+                .filter((source) => source.status === "processing" || source.status === "failed")
+                .map((source) => (
+                  <article key={source.id} className="soft-panel rounded-[24px] px-5 py-5">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-lg font-semibold" style={{ color: "var(--color-sidebar-text-bright)" }}>
+                          {source.title}
+                        </div>
+                        <div className="mt-1 text-[11px]" style={{ color: "var(--color-ink-muted)" }}>
+                          提交时间：{formatDate(source.createdAt)} · 最近更新：{formatDate(source.updatedAt)}
+                        </div>
+                      </div>
+                      <div
+                        className="rounded-full border px-3 py-1 text-[11px] font-medium"
+                        style={{
+                          background: source.status === "failed" ? "rgba(248, 113, 113, 0.14)" : "rgba(214, 161, 99, 0.14)",
+                          color: source.status === "failed" ? "#fecaca" : "var(--color-amber-soft)",
+                          borderColor: source.status === "failed" ? "rgba(248, 113, 113, 0.34)" : "rgba(214, 161, 99, 0.28)",
+                        }}
+                      >
+                        {formatSourceStatusLabel(source.status)}
+                      </div>
+                    </div>
+                    <p className="mt-4 text-sm leading-7" style={{ color: "var(--color-ink-soft)" }}>
+                      {source.status === "processing"
+                        ? "文件正在解析、生成草稿。你可以离开这个页面，稍后回来查看结果。"
+                        : source.ingestError || "处理失败，请补充内容后重新提交。"}
+                    </p>
+                    <div className="mt-4">
+                      <WikiMediaGallery media={source.media} />
+                    </div>
+                  </article>
+                ))}
               {drafts.map((draft) => {
                 const statusMeta = getPublisherStatusMeta(draft.status);
                 return (
@@ -304,6 +388,9 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
                     <p className="mt-4 text-sm leading-7" style={{ color: "var(--color-ink-soft)" }}>
                       {draft.summary}
                     </p>
+                    <div className="mt-4">
+                      <WikiMediaGallery media={draft.media} />
+                    </div>
 
                     <div className="mt-4 rounded-[20px] border px-4 py-4 text-sm leading-7" style={{
                       borderColor: "var(--surface-outline-strong)",

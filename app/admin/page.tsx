@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import KnowledgeFilePicker from "@/components/KnowledgeFilePicker";
 import WikiPublisherDashboard from "@/components/admin/WikiPublisherDashboard";
 import {
   AdminErrorBanner,
@@ -10,6 +11,7 @@ import {
   AdminStatsGrid,
   CHAT_MODELS,
   formatDate,
+  formatSourceStatusLabel,
   useDeferredSearchValue,
   useWikiAdminOverview,
 } from "@/components/admin/WikiAdminShared";
@@ -56,12 +58,6 @@ function EntryCard(props: {
       </div>
     </Link>
   );
-}
-
-function formatSourceStatusLabel(status: WikiSourceRecord["status"]) {
-  if (status === "approved") return "已通过";
-  if (status === "rejected") return "已驳回";
-  return "待处理";
 }
 
 function buildDraftSearchText(draft: WikiDraft) {
@@ -122,9 +118,13 @@ function AdminDashboard() {
     setIngestTitle,
     ingestContent,
     setIngestContent,
+    ingestFiles,
+    setIngestFiles,
     ingestModelId,
     setIngestModelId,
     submittingIngest,
+    ingestProgress,
+    ingestNotice,
     submitIngest,
     linting,
     lintResult,
@@ -148,7 +148,10 @@ function AdminDashboard() {
     sources.forEach((source) => {
       counts.set(source.status, (counts.get(source.status) || 0) + 1);
     });
-    return (["drafted", "approved", "rejected"] as const)
+    return (["processing", "failed", "drafted", "approved", "rejected"] as const)
+      .filter((status) =>
+        status === "drafted" || status === "approved" || status === "rejected" || (counts.get(status) || 0) > 0
+      )
       .map((status) => `${formatSourceStatusLabel(status)}：${counts.get(status) || 0}`);
   }, [sources]);
 
@@ -186,6 +189,18 @@ function AdminDashboard() {
         />
 
         <AdminErrorBanner error={error} />
+        {ingestNotice ? (
+          <div
+            className="rounded-[22px] border px-4 py-4 text-sm"
+            style={{
+              borderColor: "var(--surface-outline-accent)",
+              background: "var(--chip-soft)",
+              color: "var(--color-sidebar-text-bright)",
+            }}
+          >
+            {ingestNotice}
+          </div>
+        ) : null}
 
         <section className="panel-surface rounded-[28px] px-5 py-5 md:px-7">
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
@@ -326,21 +341,21 @@ function AdminDashboard() {
             href="/admin/drafts"
             kicker="Draft Queue"
             title="待审核草稿"
-            description="进入独立审核页后，再逐条编辑、保存、驳回或发布。主页面只显示数量和入口，不再直接堆全文内容。"
+            description="进入独立审核页后，再逐条编辑、保存、驳回、发布或删除。主页面只显示数量和入口，不再直接堆全文内容。"
             count={`${draftCount} 条`}
           />
           <EntryCard
             href="/admin/published"
             kicker="Wiki Library"
             title="Wiki 页面库"
-            description="按正式 Wiki 页面维度统一查看与修改，适合处理已发布的结构化知识。"
+            description="按正式 Wiki 页面维度统一查看、修改或删除，适合处理已发布的结构化知识。"
             count={`${stats?.publishedPages || 0} 页`}
           />
           <EntryCard
             href="/admin/sources"
             kicker="KB Library"
             title="KB 资料库"
-            description="按 KB 原始资料维度管理知识来源、原文内容和审核状态，方便回溯与修订。"
+            description="按 KB 原始资料维度管理知识来源、原文内容和审核状态，也可随时删除不再需要的资料。"
             count={`${stats?.rawSourceCount || 0} 条`}
           />
         </section>
@@ -400,7 +415,7 @@ function AdminDashboard() {
             <textarea
               value={ingestContent}
               onChange={(event) => setIngestContent(event.target.value)}
-              placeholder="粘贴原始资料内容。管理员提交后会直接写入正式 Wiki。"
+              placeholder="粘贴原始资料内容，也可以只上传文档、图片或视频。管理员提交后会直接写入正式 Wiki。"
               rows={10}
               className="rounded-[22px] border px-4 py-4 text-sm leading-7 outline-none"
               style={{
@@ -408,6 +423,11 @@ function AdminDashboard() {
                 background: "var(--surface-command)",
                 color: "var(--color-sidebar-text-bright)",
               }}
+            />
+            <KnowledgeFilePicker
+              files={ingestFiles}
+              onChange={setIngestFiles}
+              disabled={submittingIngest}
             />
             <div className="flex justify-end">
               <button
@@ -420,7 +440,11 @@ function AdminDashboard() {
                   opacity: submittingIngest ? 0.6 : 1,
                 }}
               >
-                {submittingIngest ? "正在发布..." : "直接发布知识"}
+                {submittingIngest
+                  ? ingestProgress != null
+                    ? `上传中 ${ingestProgress}%`
+                    : "已提交，正在排队..."
+                  : "直接发布知识"}
               </button>
             </div>
           </div>

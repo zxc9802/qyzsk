@@ -16,19 +16,22 @@ export async function GET(req: NextRequest) {
     ]);
 
     const sortedDrafts = drafts.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    const sortedSources = sources.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    const processingCount = sortedSources.filter((source) => source.status === "processing").length;
 
     return new Response(
       JSON.stringify({
         user,
         stats: {
-          totalSubmissions: sortedDrafts.length,
-          pendingCount: sortedDrafts.filter((draft) => draft.status === "draft").length,
+          totalSubmissions: sortedDrafts.length + processingCount,
+          pendingCount: sortedDrafts.filter((draft) => draft.status === "draft").length + processingCount,
           approvedCount: sortedDrafts.filter((draft) => draft.status === "approved").length,
           rejectedCount: sortedDrafts.filter((draft) => draft.status === "rejected").length,
           rawSourceCount: sources.length,
-          lastUpdatedAt: sortedDrafts[0]?.updatedAt || null,
+          lastUpdatedAt: sortedDrafts[0]?.updatedAt || sortedSources[0]?.updatedAt || null,
         },
         drafts: sortedDrafts,
+        sources: sortedSources,
       }),
       {
         headers: { "Content-Type": "application/json" },

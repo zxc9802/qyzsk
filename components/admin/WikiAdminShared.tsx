@@ -3,8 +3,10 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { CHAT_MODELS, DEFAULT_WIKI_DRAFT_MODEL_ID, type ChatModelId } from "@/lib/chat-models";
 import { extractApiErrorMessage, readJsonSafely, redirectToMainAppIfNeeded } from "@/lib/client/api-response";
+import { postFormData } from "@/lib/client/upload-form";
+import { inspectUploadFile } from "@/lib/upload-accept";
 import { buildSeeAlsoRelations, formatWikiRelationsText, parseWikiRelationsText } from "@/lib/wiki-relations";
-import type { WikiCategory, WikiDraft, WikiPage, WikiSourceRecord, WikiStats } from "@/lib/wiki-types";
+import type { WikiCategory, WikiDraft, WikiPage, WikiSourceRecord, WikiSourceStatus, WikiStats } from "@/lib/wiki-types";
 
 export type OverviewPayload = {
   stats: WikiStats;
@@ -25,7 +27,21 @@ export type DraftEditorState = {
   notes: string;
 };
 
-export const CATEGORY_OPTIONS: WikiCategory[] = ["concepts", "entities", "roles", "faq", "synthesis"];
+export function formatSourceStatusLabel(status: WikiSourceStatus) {
+  if (status === "processing") return "处理中";
+  if (status === "approved") return "已通过";
+  if (status === "rejected") return "已驳回";
+  if (status === "failed") return "处理失败";
+  return "待处理";
+}
+
+export const SOURCE_STATUS_GROUPS: WikiSourceStatus[] = [
+  "processing",
+  "failed",
+  "drafted",
+  "approved",
+  "rejected",
+];
 
 export function formatDate(value?: string | null) {
   if (!value) return "—";
@@ -79,8 +95,11 @@ export function useWikiAdminOverview() {
   const [error, setError] = useState<string | null>(null);
   const [ingestTitle, setIngestTitle] = useState("");
   const [ingestContent, setIngestContent] = useState("");
+  const [ingestFiles, setIngestFiles] = useState<File[]>([]);
   const [ingestModelId, setIngestModelId] = useState<ChatModelId>(DEFAULT_WIKI_DRAFT_MODEL_ID);
   const [submittingIngest, setSubmittingIngest] = useState(false);
+  const [ingestProgress, setIngestProgress] = useState<number | null>(null);
+  const [ingestNotice, setIngestNotice] = useState<string | null>(null);
   const [draftEditors, setDraftEditors] = useState<Record<string, DraftEditorState>>({});
   const [savingDraftId, setSavingDraftId] = useState<string | null>(null);
   const [bulkApproving, setBulkApproving] = useState(false);
@@ -113,29 +132,51 @@ export function useWikiAdminOverview() {
     []
   );
 
-  const loadOverview = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const loadOverview = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setLoading(true);
+      setError(null);
+    }
 
     try {
       const payload = await apiRequest<OverviewPayload>("/api/wiki/overview");
       setOverview(payload);
-      setDraftEditors(
-        payload.drafts.reduce<Record<string, DraftEditorState>>((result, draft) => {
+      setDraftEditors((previous) => {
+        if (options?.silent) {
+          const next = { ...previous };
+          payload.drafts.forEach((draft) => {
+            if (!next[draft.id]) next[draft.id] = buildDraftEditorState(draft);
+          });
+          return next;
+        }
+
+        return payload.drafts.reduce<Record<string, DraftEditorState>>((result, draft) => {
           result[draft.id] = buildDraftEditorState(draft);
           return result;
-        }, {})
-      );
+        }, {});
+      });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "读取 Wiki 管理数据失败。");
+      if (!options?.silent) {
+        setError(requestError instanceof Error ? requestError.message : "读取 Wiki 管理数据失败。");
+      }
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
   }, [apiRequest]);
 
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
+
+  const hasProcessingSources = Boolean(overview?.sources.some((source) => source.status === "processing"));
+
+  useEffect(() => {
+    if (!hasProcessingSources) return;
+    const intervalId = window.setInterval(() => {
+      void loadOverview({ silent: true });
+    }, 2500);
+    return () => window.clearInterval(intervalId);
+  }, [hasProcessingSources, loadOverview]);
 
   const activeDrafts = useMemo(
     () => overview?.drafts.filter((draft) => draft.status === "draft") || [],
@@ -153,31 +194,67 @@ export function useWikiAdminOverview() {
   }
 
   async function submitIngest() {
-    if (!ingestContent.trim()) {
-      setError("请先填写要发布的资料内容。");
+    if (!ingestContent.trim() && ingestFiles.length === 0) {
+      setError("请先填写资料内容，或上传文档、图片、视频。");
+      return;
+    }
+
+    const rejected = ingestFiles.map(inspectUploadFile).filter((item) => !item.ok);
+    if (rejected.length > 0) {
+      setError(rejected.map((item) => (!item.ok ? item.error : "")).join("\n"));
       return;
     }
 
     setSubmittingIngest(true);
+    setIngestProgress(ingestFiles.length > 0 ? 0 : null);
     setError(null);
+    setIngestNotice(null);
 
     try {
-      await apiRequest("/api/wiki/ingest", {
-        method: "POST",
-        body: JSON.stringify({
-          title: ingestTitle.trim(),
-          content: ingestContent.trim(),
-          modelId: ingestModelId,
-        }),
+      const formData = new FormData();
+      formData.append("title", ingestTitle.trim());
+      formData.append("content", ingestContent.trim());
+      formData.append("modelId", ingestModelId);
+      ingestFiles.forEach((file) => formData.append("files", file));
+
+      const payload = await postFormData<{ message?: string }> ({
+        url: "/api/wiki/ingest",
+        formData,
+        onProgress: ingestFiles.length > 0 ? setIngestProgress : undefined,
       });
 
       setIngestTitle("");
       setIngestContent("");
-      await loadOverview();
+      setIngestFiles([]);
+      setIngestNotice(payload.message || "资料已提交，正在后台处理。");
+      await loadOverview({ silent: true });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "提交资料失败。");
     } finally {
       setSubmittingIngest(false);
+      setIngestProgress(null);
+    }
+  }
+
+  async function deleteDraft(draftId: string) {
+    const draft = overview?.drafts.find((item) => item.id === draftId);
+    const confirmed = window.confirm(
+      `确定删除草稿「${draft?.title || draftId}」？此操作不可恢复。`
+    );
+    if (!confirmed) return;
+
+    setSavingDraftId(draftId);
+    setError(null);
+
+    try {
+      await apiRequest(`/api/wiki/drafts/${draftId}`, {
+        method: "DELETE",
+      });
+      await loadOverview();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "删除草稿失败。");
+    } finally {
+      setSavingDraftId(null);
     }
   }
 
@@ -307,14 +384,19 @@ export function useWikiAdminOverview() {
     setIngestTitle,
     ingestContent,
     setIngestContent,
+    ingestFiles,
+    setIngestFiles,
     ingestModelId,
     setIngestModelId,
     submittingIngest,
+    ingestProgress,
+    ingestNotice,
     submitIngest,
     draftEditors,
     updateDraftEditor,
     savingDraftId,
     submitDraftAction,
+    deleteDraft,
     bulkApproving,
     approveAllDrafts,
     linting,

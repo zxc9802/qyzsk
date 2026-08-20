@@ -1,5 +1,8 @@
 import { getRagConfig } from "@/lib/server/rag-config";
 
+// Retrieval-time embeddings stay on the existing OpenAI-compatible model.
+// Uploaded files use Gemini Embedding 2 via lib/server/upload-embeddings.ts.
+
 type OpenAiEmbeddingItem = {
   embedding: number[];
 };

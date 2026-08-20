@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { ANSWER_MODES, AnswerMode } from "@/lib/answer-modes";
 import { CHAT_MODELS, ChatModelId } from "@/lib/chat-models";
 import { ConversationFile } from "@/lib/types";
+import { collectDroppedFiles } from "@/lib/upload-accept";
 import ConversationFiles from "./ConversationFiles";
 
 interface InputBarProps {
@@ -40,6 +41,7 @@ export default function InputBar({
   uploadStatus,
 }: InputBarProps) {
   const [text, setText] = useState("");
+  const [dragActive, setDragActive] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -78,6 +80,14 @@ export default function InputBar({
       await onUpload(files);
     }
     e.target.value = "";
+  };
+
+  const handleDropFiles = async (dataTransfer: DataTransfer | null) => {
+    if (disabled || isUploading) return;
+    const droppedFiles = collectDroppedFiles(dataTransfer);
+    if (droppedFiles.length > 0) {
+      await onUpload(droppedFiles);
+    }
   };
 
   const footerText = uploadStatus || null;
@@ -159,9 +169,27 @@ export default function InputBar({
 
         <div
           className="mt-1 flex items-end gap-3 rounded-[30px] border px-4 py-4 transition-all duration-200 md:px-5"
+          onDragEnter={(event) => {
+            event.preventDefault();
+            if (!disabled && !isUploading) setDragActive(true);
+          }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            if (!disabled && !isUploading) setDragActive(true);
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+              setDragActive(false);
+            }
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragActive(false);
+            void handleDropFiles(event.dataTransfer);
+          }}
           style={{
-            background: "var(--surface-command)",
-            borderColor: "var(--surface-outline-strong)",
+            background: dragActive ? "var(--file-row-active)" : "var(--surface-command)",
+            borderColor: dragActive ? "var(--surface-outline-accent-strong)" : "var(--surface-outline-strong)",
             boxShadow: "var(--card-shadow)",
           }}
         >
@@ -169,7 +197,7 @@ export default function InputBar({
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".pdf,.doc,.docx,.mp4,.png,.jpg,.jpeg"
+            accept=".pdf,.doc,.docx,.txt,.md,.mp4,.webm,.mov,.png,.jpg,.jpeg,.webp,.gif"
             className="hidden"
             onChange={handleFileChange}
           />
@@ -186,7 +214,7 @@ export default function InputBar({
               color: isUploading ? "var(--color-amber-deep)" : "var(--color-sidebar-text-bright)",
               opacity: disabled ? 0.6 : 1,
             }}
-            title="上传 PDF、Word、MP4、PNG、JPG"
+            title="上传 PDF、Word、TXT、图片或视频"
           >
             {isUploading ? (
               <span className="text-[11px] font-semibold">...</span>
@@ -205,7 +233,7 @@ export default function InputBar({
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="把你的问题、目标或资料分析任务写在这里。"
+              placeholder={dragActive ? "松开即可上传文档、图片或视频" : "把你的问题、目标或资料分析任务写在这里。"}
               disabled={disabled}
               rows={1}
               className="w-full resize-none border-none bg-transparent px-2 py-2 text-[15px] leading-8 outline-none"

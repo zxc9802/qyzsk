@@ -603,6 +603,13 @@ export default function Home() {
                     })
                   );
                 }
+                if (Array.isArray(parsed.mediaItems)) {
+                  setConversations((prev) =>
+                    updateLastAssistantMessage(prev, conversationId, {
+                      mediaItems: parsed.mediaItems,
+                    })
+                  );
+                }
                 if (parsed.content) {
                   accumulated += parsed.content;
                   const sanitized = sanitizeAssistantOutput(accumulated);
