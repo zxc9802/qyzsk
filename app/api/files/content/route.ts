@@ -4,6 +4,7 @@ import path from "path";
 import { NextRequest } from "next/server";
 import { Readable } from "stream";
 import { appSessionErrorResponse, assertAppUserSession } from "@/lib/server/app-session";
+import { tryGetCosRedirectUrl } from "@/lib/server/cos";
 import { getFileRecord } from "@/lib/server/file-store";
 
 export const runtime = "nodejs";
@@ -47,6 +48,11 @@ export async function GET(req: NextRequest) {
   const record = await getFileRecord(userId, conversationId, fileId);
   if (!record) {
     return json({ error: "文件不存在。" }, 404);
+  }
+
+  const remoteUrl = await tryGetCosRedirectUrl(variant === "poster" ? record.posterRemoteKey : record.remoteKey);
+  if (remoteUrl) {
+    return Response.redirect(remoteUrl, 302);
   }
 
   const filePath = variant === "poster" ? await resolvePosterPath(record.storagePath) : record.storagePath;

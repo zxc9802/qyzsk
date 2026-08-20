@@ -7,6 +7,13 @@ import {
   normalizeUploadMimeType,
   processStandaloneFile,
 } from "@/lib/server/file-processing";
+import {
+  deleteCosKeys,
+  shouldStoreOnCos,
+  uploadProcessedMediaToCos,
+  wikiMediaPosterKey,
+  wikiMediaSourceKey,
+} from "@/lib/server/cos";
 import { generateServerId, inferExtension, STORAGE_ROOT } from "@/lib/server/file-store";
 import { embedAndStoreUploadVector } from "@/lib/server/upload-embeddings";
 import type { WikiMediaAsset, WikiMediaKind } from "@/lib/wiki-types";
@@ -17,6 +24,8 @@ const MEDIA_ROOT = path.join(STORAGE_ROOT, "wiki", "media");
 export interface WikiMediaRecord extends WikiMediaAsset {
   storagePath: string;
   posterPath?: string;
+  remoteKey?: string;
+  posterRemoteKey?: string;
 }
 
 function sanitizeId(value: string): string {
@@ -76,10 +85,14 @@ export async function readWikiMediaRecord(mediaId: string): Promise<WikiMediaRec
   return readJson<WikiMediaRecord | null>(metaPath(mediaId), null);
 }
 
+export async function purgeWikiMediaStorage(mediaId: string) {
+  const record = await readWikiMediaRecord(mediaId);
+  await deleteCosKeys([record?.remoteKey, record?.posterRemoteKey]);
+  await fs.rm(mediaDir(mediaId), { recursive: true, force: true });
+}
+
 export async function deleteWikiMediaRecords(media?: WikiMediaAsset[]) {
-  await Promise.all(
-    normalizeWikiMediaAssets(media).map((item) => fs.rm(mediaDir(item.id), { recursive: true, force: true }))
-  );
+  await Promise.all(normalizeWikiMediaAssets(media).map((item) => purgeWikiMediaStorage(item.id)));
 }
 
 export async function createWikiMediaFromUpload(options: {
@@ -119,6 +132,23 @@ export async function createWikiMediaFromUpload(options: {
     storagePath,
     ...(posterPath ? { posterPath } : {}),
   };
+
+  if (shouldStoreOnCos(options.kind)) {
+    try {
+      const uploaded = await uploadProcessedMediaToCos({
+        sourceKey: wikiMediaSourceKey(id, `source${extension}`),
+        sourcePath: storagePath,
+        contentType: options.mimeType,
+        posterPath,
+        posterKey: posterPath ? wikiMediaPosterKey(id) : undefined,
+      });
+      record.remoteKey = uploaded.remoteKey;
+      if (uploaded.posterRemoteKey) record.posterRemoteKey = uploaded.posterRemoteKey;
+    } catch (error) {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      throw error;
+    }
+  }
 
   await writeJson(metaPath(id), record);
   await embedAndStoreUploadVector({

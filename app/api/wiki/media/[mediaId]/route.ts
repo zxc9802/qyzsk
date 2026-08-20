@@ -3,6 +3,7 @@ import { stat } from "fs/promises";
 import { NextRequest } from "next/server";
 import { Readable } from "stream";
 import { appSessionErrorResponse, assertAppUserSession } from "@/lib/server/app-session";
+import { tryGetCosRedirectUrl } from "@/lib/server/cos";
 import { readWikiMediaRecord } from "@/lib/server/wiki-media";
 
 export const runtime = "nodejs";
@@ -29,6 +30,11 @@ export async function GET(
   if (!record) return notFound();
 
   const variant = new URL(req.url).searchParams.get("variant");
+  const remoteUrl = await tryGetCosRedirectUrl(variant === "poster" ? record.posterRemoteKey : record.remoteKey);
+  if (remoteUrl) {
+    return Response.redirect(remoteUrl, 302);
+  }
+
   const filePath = variant === "poster" ? record.posterPath : record.storagePath;
   if (!filePath) return notFound();
 

@@ -18,6 +18,7 @@ import {
   type WikiStats,
   type WikiSubmitter,
 } from "@/lib/wiki-types";
+import { deleteCosKeys } from "@/lib/server/cos";
 import { STORAGE_ROOT } from "@/lib/server/file-store";
 
 const PUBLISHED_ROOT = path.join(process.cwd(), "wiki");
@@ -477,11 +478,27 @@ function wikiMediaDir(mediaId: string) {
   return path.join(WIKI_MEDIA_ROOT, id);
 }
 
+async function readWikiMediaRemoteKeys(mediaId: string): Promise<string[]> {
+  try {
+    const raw = await fs.readFile(path.join(wikiMediaDir(mediaId), "meta.json"), "utf8");
+    const meta = JSON.parse(raw) as { remoteKey?: unknown; posterRemoteKey?: unknown };
+    return [meta.remoteKey, meta.posterRemoteKey].filter(
+      (key): key is string => typeof key === "string" && Boolean(key.trim())
+    );
+  } catch {
+    return [];
+  }
+}
+
 async function deleteUnreferencedMedia(media: WikiMediaAsset[] | undefined, referenced: Set<string>) {
   await Promise.all(
     normalizeWikiMediaAssets(media)
       .filter((item) => !referenced.has(item.id))
-      .map((item) => fs.rm(wikiMediaDir(item.id), { recursive: true, force: true }))
+      .map(async (item) => {
+        const keys = await readWikiMediaRemoteKeys(item.id);
+        await deleteCosKeys(keys);
+        await fs.rm(wikiMediaDir(item.id), { recursive: true, force: true });
+      })
   );
 }
 

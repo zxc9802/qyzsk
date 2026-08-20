@@ -11,6 +11,7 @@ import {
   saveFileRecord,
   saveFileSegments,
 } from "@/lib/server/file-store";
+import { uploadConversationFileToCos } from "@/lib/server/cos";
 import type { ConversationFileRecord, FileKind, FileSegment } from "@/lib/server/file-store";
 import { generateGeminiText, geminiConfigured } from "@/lib/server/newapi-gemini";
 import { embedAndStoreUploadVector } from "@/lib/server/upload-embeddings";
@@ -214,12 +215,12 @@ async function persistProcessedFile(
   const latestRecord = await getFileRecord(originalRecord.userId, originalRecord.conversationId, originalRecord.id);
   if (!latestRecord) return null;
 
-  const mergedRecord: ConversationFileRecord = {
+  const mergedRecord: ConversationFileRecord = await uploadConversationFileToCos({
     ...processedRecord,
     active: latestRecord.active,
     createdAt: latestRecord.createdAt,
     updatedAt: Date.now(),
-  };
+  });
 
   await saveFileRecord(mergedRecord);
   await saveFileSegments(originalRecord.userId, originalRecord.conversationId, originalRecord.id, segments);
