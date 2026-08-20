@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "fs";
 import path from "path";
 import {
@@ -169,7 +170,7 @@ async function ensureDir(dirPath: string) {
 
 async function writeJson(filePath: string, data: unknown) {
   await ensureDir(path.dirname(filePath));
-  const tempPath = `${filePath}.tmp-${Date.now()}`;
+  const tempPath = `${filePath}.tmp-${randomUUID()}`;
   await fs.writeFile(tempPath, JSON.stringify(data, null, 2), "utf8");
   await fs.rename(tempPath, filePath);
 }
@@ -510,9 +511,7 @@ export async function listPublishedPages(): Promise<WikiPageSearchDocument[]> {
   if (cachedMeta?.fingerprint === fingerprint) {
     const cachedPages = await readJson<WikiPageSearchDocument[] | null>(INDEX_CACHE_PATH, null);
     if (cachedPages) {
-      const normalizedCachedPages = cachedPages.map((page) => normalizePublishedSearchDocument(page));
-      await writeJson(INDEX_CACHE_PATH, normalizedCachedPages);
-      return normalizedCachedPages;
+      return cachedPages.map((page) => normalizePublishedSearchDocument(page));
     }
   }
 

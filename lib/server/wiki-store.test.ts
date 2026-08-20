@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
 import { access, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -22,6 +23,29 @@ async function withTempCwd<T>(callback: () => Promise<T>) {
   } finally {
     process.chdir(previousCwd);
   }
+}
+
+async function writePublishedPageFixture() {
+  await mkdir(path.join(process.cwd(), "wiki", "concepts"), { recursive: true });
+  await writeFile(
+    path.join(process.cwd(), "wiki", "concepts", "main.md"),
+    `---
+id: "concepts/main"
+title: "主页面"
+category: "concepts"
+summary: "主页面摘要"
+roles: ["全员"]
+source_ids: ["KB001"]
+related_pages: []
+created_at: "2026-04-22"
+updated_at: "2026-04-22"
+version: 1
+---
+
+# 主页面
+`,
+    "utf8"
+  );
 }
 
 test("listPublishedPages parses typed relations and derives relatedPages from them", async () => {
@@ -288,5 +312,57 @@ test("deleteWikiSourceRecord removes the source and its drafts but keeps publish
     const published = await readPublishedPage("faq/keep");
     assert.ok(published);
     assert.equal(published.title, "保留页面");
+  });
+});
+
+test("concurrent published cache rebuilds use distinct temporary files", async () => {
+  await withTempCwd(async () => {
+    await writePublishedPageFixture();
+    const { listPublishedPages } = await importStoreModule();
+    const originalRename = fs.rename;
+    const originalDateNow = Date.now;
+    const renames: Array<{ source: string; destination: string }> = [];
+
+    fs.rename = async (oldPath, newPath) => {
+      renames.push({ source: String(oldPath), destination: String(newPath) });
+    };
+    Date.now = () => 1_777_777_777_777;
+
+    try {
+      await Promise.all([listPublishedPages(), listPublishedPages()]);
+    } finally {
+      fs.rename = originalRename;
+      Date.now = originalDateNow;
+    }
+
+    const cacheRenames = renames.filter((item) => item.destination.endsWith("published-index.json"));
+    assert.equal(cacheRenames.length, 2);
+    assert.equal(new Set(cacheRenames.map((item) => item.source)).size, 2);
+  });
+});
+
+test("listPublishedPages does not rewrite a valid cache hit", async () => {
+  await withTempCwd(async () => {
+    await writePublishedPageFixture();
+    const { listPublishedPages } = await importStoreModule();
+    await listPublishedPages();
+
+    const originalRename = fs.rename;
+    const renamedDestinations: string[] = [];
+    fs.rename = async (_oldPath, newPath) => {
+      renamedDestinations.push(String(newPath));
+    };
+
+    try {
+      const pages = await listPublishedPages();
+      assert.equal(pages.length, 1);
+    } finally {
+      fs.rename = originalRename;
+    }
+
+    assert.equal(
+      renamedDestinations.filter((destination) => destination.endsWith("published-index.json")).length,
+      0
+    );
   });
 });
