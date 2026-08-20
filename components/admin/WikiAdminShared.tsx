@@ -27,6 +27,8 @@ export type DraftEditorState = {
   notes: string;
 };
 
+export const CATEGORY_OPTIONS: WikiCategory[] = ["concepts", "entities", "roles", "faq", "synthesis"];
+
 export function formatSourceStatusLabel(status: WikiSourceStatus) {
   if (status === "processing") return "处理中";
   if (status === "approved") return "已通过";

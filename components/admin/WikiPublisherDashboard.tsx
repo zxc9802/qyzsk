@@ -106,16 +106,6 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
   const drafts = overview?.drafts || [];
   const sources = overview?.sources || [];
   const hasProcessingSources = sources.some((source) => source.status === "processing");
-
-  useEffect(() => {
-    if (!hasProcessingSources) return;
-    const intervalId = window.setInterval(() => {
-      void loadOverview({ silent: true });
-    }, 2500);
-    return () => window.clearInterval(intervalId);
-  }, [hasProcessingSources, loadOverview]);
-
-  const drafts = overview?.drafts || [];
   const stats = overview?.stats || {
     totalSubmissions: drafts.length,
     pendingCount: drafts.filter((draft) => draft.status === "draft").length,
@@ -124,6 +114,14 @@ export default function WikiPublisherDashboard(props: { viewer: AppViewer | null
     rawSourceCount: drafts.length,
     lastUpdatedAt: drafts[0]?.updatedAt || null,
   };
+
+  useEffect(() => {
+    if (!hasProcessingSources) return;
+    const intervalId = window.setInterval(() => {
+      void loadOverview({ silent: true });
+    }, 2500);
+    return () => window.clearInterval(intervalId);
+  }, [hasProcessingSources, loadOverview]);
 
   async function submitIngest() {
     if (!ingestContent.trim() && ingestFiles.length === 0) {
