@@ -53,3 +53,11 @@ export function canUseKbChatRole(access: KbChatRoleAccess | undefined, roleId: s
   if (!access || access.mode === "all") return true;
   return access.roleKeys.includes(roleId);
 }
+
+export function filterExampleQuestionsByRole<T extends { roleId: string }>(
+  questions: readonly T[],
+  roleId: string | null | undefined,
+): T[] {
+  if (!roleId) return [];
+  return questions.filter((item) => item.roleId === roleId);
+}

@@ -30,6 +30,7 @@ interface ChatAreaProps {
   themeMode: ThemeMode;
   onThemeToggle: () => void;
   roleName: string;
+  roleId: string | null;
   onRoleClick: () => void;
   isUploading: boolean;
   uploadStatus?: string | null;
@@ -56,6 +57,7 @@ export default function ChatArea({
   themeMode,
   onThemeToggle,
   roleName,
+  roleId,
   onRoleClick,
   isUploading,
   uploadStatus,
@@ -175,7 +177,7 @@ export default function ChatArea({
       </div>
 
       {isEmpty ? (
-        <EmptyState onQuestionClick={onSend} />
+        <EmptyState onQuestionClick={onSend} roleId={roleId} roleName={roleName} />
       ) : (
         <div ref={scrollRef} className="relative flex-1 overflow-y-auto px-6 py-6 md:px-10 md:py-8">
           <div className="mx-auto max-w-6xl">

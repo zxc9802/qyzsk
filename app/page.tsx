@@ -795,6 +795,7 @@ export default function Home() {
             themeMode={themeMode}
             onThemeToggle={() => setThemeMode((prev) => (prev === "dark" ? "light" : "dark"))}
             roleName={roleName}
+            roleId={role}
             onRoleClick={() => {
               if (allowedRoles.length > 1) setShowRoleModal(true);
             }}

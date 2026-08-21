@@ -1,9 +1,12 @@
 "use client";
 
 import { EXAMPLE_QUESTIONS } from "@/lib/types";
+import { filterExampleQuestionsByRole } from "@/lib/kb-chat-role-access";
 
 interface EmptyStateProps {
   onQuestionClick: (question: string) => void;
+  roleId: string | null;
+  roleName: string;
 }
 
 const CAPABILITY_NOTES = [
@@ -12,7 +15,8 @@ const CAPABILITY_NOTES = [
   "适合产品判断、内容策略、运营诊断和复盘落地。",
 ];
 
-export default function EmptyState({ onQuestionClick }: EmptyStateProps) {
+export default function EmptyState({ onQuestionClick, roleId, roleName }: EmptyStateProps) {
+  const questions = filterExampleQuestionsByRole(EXAMPLE_QUESTIONS, roleId);
   return (
     <div className="flex-1 overflow-y-auto px-6 py-8 md:px-10 md:py-10">
       <div className="mx-auto max-w-6xl">
@@ -106,13 +110,25 @@ export default function EmptyState({ onQuestionClick }: EmptyStateProps) {
           <div className="mb-4 flex items-center justify-between gap-4">
             <div className="editorial-kicker">Suggested Prompts</div>
             <p className="text-xs" style={{ color: "var(--color-ink-muted)" }}>
-              可以直接拿这些问题开一轮策略讨论
+              {roleId ? `这些是${roleName}常用的起步问题` : "选择岗位后会看到对应的起步问题"}
             </p>
           </div>
+          {questions.length === 0 ? (
+            <div
+              className="rounded-[26px] border px-5 py-8 text-sm leading-7"
+              style={{
+                background: "var(--surface-card)",
+                borderColor: "var(--surface-outline)",
+                color: "var(--color-ink-soft)",
+              }}
+            >
+              当前岗位还没有可展示的提示问题。
+            </div>
+          ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {EXAMPLE_QUESTIONS.map((q, i) => (
+            {questions.map((q, i) => (
               <button
-                key={i}
+                key={`${q.roleId}-${q.title}`}
                 onClick={() => onQuestionClick(q.question)}
                 className="group animate-fade-up text-left rounded-[26px] border px-5 py-5 transition-all duration-200 cursor-pointer"
                 style={{
@@ -145,6 +161,7 @@ export default function EmptyState({ onQuestionClick }: EmptyStateProps) {
               </button>
             ))}
           </div>
+          )}
         </section>
       </div>
     </div>
