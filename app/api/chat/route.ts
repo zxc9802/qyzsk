@@ -35,6 +35,11 @@ import {
   assertAppUserSession,
 } from "@/lib/server/app-session";
 import {
+  canUseKbChatRole,
+  DEFAULT_KB_CHAT_ROLE_ACCESS,
+  parseKbChatRoleAccess,
+} from "@/lib/kb-chat-role-access";
+import {
   buildConversationMemoryContext,
   buildEmergencyHistoryWindow,
   estimatePromptChars,
@@ -47,6 +52,13 @@ import {
 } from "@/lib/server/conversation-context";
 import { enqueueConversationCompressionJob } from "@/lib/server/conversation-context-queue";
 import { ensureConversationRecord } from "@/lib/server/chat-state-store";
+import {
+  extractStreamUsageFragment,
+  mergeStreamUsage,
+  reportKbChatTextUsage,
+  type KbChatTokenUsage,
+  type KbChatUsageUser,
+} from "@/lib/server/usage-monitor";
 import type { QuestionDiagnosis, RetrievalSourceHit } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -309,6 +321,7 @@ function buildProviderRequestBody(
     model: apiModel,
     messages,
     stream: options.stream,
+    ...(options.stream ? { stream_options: { include_usage: true } } : {}),
     max_tokens: options.maxTokens,
     temperature: options.temperature,
   };
@@ -580,8 +593,13 @@ async function attemptEmergencyCompression(options: {
 export async function POST(req: NextRequest) {
   try {
     let userId = "";
+    let usageUser: KbChatUsageUser | null = null;
+    let roleAccess = DEFAULT_KB_CHAT_ROLE_ACCESS;
     try {
-      ({ userId } = await assertAppUserSession(req));
+      const authenticated = await assertAppUserSession(req);
+      userId = authenticated.userId;
+      usageUser = authenticated.user;
+      roleAccess = parseKbChatRoleAccess(authenticated.session?.user?.kbChatRoles);
     } catch (error) {
       return appSessionErrorResponse(error, req);
     }
@@ -600,6 +618,11 @@ export async function POST(req: NextRequest) {
 
     if (!message || typeof message !== "string") {
       return createJsonResponse({ error: "Missing message" }, 400);
+    }
+
+    const requestedRole = typeof role === "string" && role.trim() ? role.trim() : "new";
+    if (!canUseKbChatRole(roleAccess, requestedRole)) {
+      return createJsonResponse({ error: "管理员未向该账号开放此知识库岗位。" }, 403);
     }
 
     if (typeof conversationId === "string" && conversationId.trim()) {
@@ -785,6 +808,7 @@ export async function POST(req: NextRequest) {
     const effectiveKnowledgeContext = webSearchPolicy.shouldDownweightLocalKnowledge ? "" : knowledgeContext;
     const effectiveKbHits = webSearchPolicy.shouldDownweightLocalKnowledge ? [] : kbHits;
     const effectiveSourceHits = webSearchPolicy.shouldDownweightLocalKnowledge ? [] : sourceHits;
+    const effectiveMediaItems = webSearchPolicy.shouldDownweightLocalKnowledge ? [] : retrieval.mediaItems;
     const answerNaturallyWithMissingInfo =
       resolvedHasShownClarificationGuide
       || (diagnosis?.mode === "clarify" && webSearchPolicy.shouldBypassClarification);
@@ -879,6 +903,7 @@ export async function POST(req: NextRequest) {
               ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
               ...(kbHits.length > 0 ? [{ kbHits }] : []),
               ...(mergedSourceHits.length > 0 ? [{ sourceHits: mergedSourceHits }] : []),
+              ...(effectiveMediaItems.length > 0 ? [{ mediaItems: effectiveMediaItems }] : []),
               { content: groundedResult.text },
             ]
           );
@@ -922,6 +947,7 @@ export async function POST(req: NextRequest) {
                 ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
                 ...(effectiveKbHits.length > 0 ? [{ kbHits: effectiveKbHits }] : []),
                 ...(mergedSourceHits.length > 0 ? [{ sourceHits: mergedSourceHits }] : []),
+                ...(effectiveMediaItems.length > 0 ? [{ mediaItems: effectiveMediaItems }] : []),
                 { content: webResult.text },
               ]
             );
@@ -967,6 +993,7 @@ export async function POST(req: NextRequest) {
             ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
             ...(effectiveKbHits.length > 0 ? [{ kbHits: effectiveKbHits }] : []),
             ...(effectiveSourceHits.length > 0 ? [{ sourceHits: effectiveSourceHits }] : []),
+            ...(effectiveMediaItems.length > 0 ? [{ mediaItems: effectiveMediaItems }] : []),
             { content: answerText },
           ]
         );
@@ -1082,6 +1109,7 @@ export async function POST(req: NextRequest) {
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
         let closed = false;
+        let capturedUsage: KbChatTokenUsage | null = null;
 
         const safeEnqueue = (payload: string) => {
           if (closed) return;
@@ -1124,6 +1152,10 @@ export async function POST(req: NextRequest) {
             safeEnqueue(`data: ${JSON.stringify({ sourceHits: effectiveSourceHits })}\n\n`);
           }
 
+          if (effectiveMediaItems.length > 0) {
+            safeEnqueue(`data: ${JSON.stringify({ mediaItems: effectiveMediaItems })}\n\n`);
+          }
+
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -1148,6 +1180,10 @@ export async function POST(req: NextRequest) {
 
               try {
                 const parsed = JSON.parse(data);
+                capturedUsage = mergeStreamUsage(
+                  capturedUsage,
+                  extractStreamUsageFragment(parsed),
+                );
                 const content = parsed.choices?.[0]?.delta?.content;
                 if (content) {
                   safeEnqueue(`data: ${JSON.stringify({ content })}\n\n`);
@@ -1160,6 +1196,20 @@ export async function POST(req: NextRequest) {
         } catch (error) {
           console.error("Stream read error:", error);
         } finally {
+          if (capturedUsage && usageUser) {
+            const groupMultiplier = modelOption.provider === "newapi"
+              ? Number(process.env.NEWAPI_GROUP_MULTIPLIER) || 1
+              : modelOption.provider === "yunwu_claude_messages"
+                ? Number(process.env.YUNWU_CLAUDE_GROUP_MULTIPLIER) || 1
+                : Number(process.env.YUNWU_GROUP_MULTIPLIER) || 1;
+            await reportKbChatTextUsage({
+              user: usageUser,
+              model: apiModel,
+              providerId: modelOption.provider,
+              usage: capturedUsage,
+              groupMultiplier,
+            });
+          }
           safeEnqueue("data: [DONE]\n\n");
           safeClose();
         }

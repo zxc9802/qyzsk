@@ -4,6 +4,7 @@ import { ROLES } from "@/lib/types";
 
 interface RoleSelectorProps {
   onSelect: (roleId: string, roleName: string) => void;
+  roles?: typeof ROLES | Array<(typeof ROLES)[number]>;
 }
 
 const GUIDING_POINTS = [
@@ -12,7 +13,7 @@ const GUIDING_POINTS = [
   "先选一个最接近你的身份，我们再在对话里继续细化。",
 ];
 
-export default function RoleSelector({ onSelect }: RoleSelectorProps) {
+export default function RoleSelector({ onSelect, roles = ROLES }: RoleSelectorProps) {
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto px-3 py-3 animate-backdrop md:px-4 md:py-4">
       <div className="absolute inset-0 backdrop-blur-xl" style={{ background: "var(--role-overlay)" }} />
@@ -90,7 +91,7 @@ export default function RoleSelector({ onSelect }: RoleSelectorProps) {
                 </div>
               </div>
               <div className="grid gap-2.5 md:grid-cols-2">
-                {ROLES.map((role) => (
+                {roles.map((role) => (
                   <button
                     key={role.id}
                     onClick={() => onSelect(role.id, role.name)}

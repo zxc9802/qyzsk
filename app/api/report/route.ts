@@ -4,6 +4,7 @@ import {
   appSessionErrorResponse,
   assertAppUserSession,
 } from "@/lib/server/app-session";
+import { canUseKbChatRole, parseKbChatRoleAccess } from "@/lib/kb-chat-role-access";
 import { ensureConversationRecord } from "@/lib/server/chat-state-store";
 import { buildConversationReport } from "@/lib/server/report-builder";
 
@@ -40,8 +41,11 @@ function isValidReportRequest(body: unknown): body is ReportGenerationRequest {
 export async function POST(req: NextRequest) {
   try {
     let userId = "";
+    let roleAccess = parseKbChatRoleAccess(undefined);
     try {
-      ({ userId } = await assertAppUserSession(req));
+      const authenticated = await assertAppUserSession(req);
+      userId = authenticated.userId;
+      roleAccess = parseKbChatRoleAccess(authenticated.session?.user?.kbChatRoles);
     } catch (error) {
       return appSessionErrorResponse(error, req);
     }
@@ -50,6 +54,10 @@ export async function POST(req: NextRequest) {
 
     if (!isValidReportRequest(body)) {
       return createJsonResponse({ error: "报告生成请求缺少必要字段。" }, 400);
+    }
+
+    if (!canUseKbChatRole(roleAccess, body.roleId)) {
+      return createJsonResponse({ error: "管理员未向该账号开放此知识库岗位。" }, 403);
     }
 
     await ensureConversationRecord(userId, body.conversationId, body.conversationTitle);

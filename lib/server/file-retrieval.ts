@@ -1,4 +1,5 @@
-import type { RetrievalSourceHit } from "@/lib/types";
+import type { ChatMediaItem, RetrievalSourceHit } from "@/lib/types";
+import { toConversationChatMediaItem } from "@/lib/server/chat-media";
 import { getFileSegments, listConversationFiles } from "@/lib/server/file-store";
 
 const MAX_FILES_IN_CONTEXT = 3;
@@ -23,6 +24,7 @@ export async function buildConversationFileRetrieval(
 ): Promise<{
   context: string;
   hits: RetrievalSourceHit[];
+  mediaItems: ChatMediaItem[];
 }> {
   const activeFiles = (await listConversationFiles(userId, conversationId))
     .filter((file) => file.active && file.status === "ready")
@@ -32,6 +34,7 @@ export async function buildConversationFileRetrieval(
     return {
       context: "",
       hits: [],
+      mediaItems: [],
     };
   }
 
@@ -78,12 +81,16 @@ export async function buildConversationFileRetrieval(
     return {
       context: "",
       hits: [],
+      mediaItems: [],
     };
   }
 
   return {
     context: `以下是当前会话里用户上传并保持激活的资料摘要。它们只是后台参考资料，不要把内部片段标签原样展示给用户。只有当这些资料和问题有关时再使用。\n\n${blocks.join("\n\n---\n\n")}`,
     hits,
+    mediaItems: activeFiles
+      .map((file) => toConversationChatMediaItem(file))
+      .filter((item): item is ChatMediaItem => Boolean(item)),
   };
 }
 

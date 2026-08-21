@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
-import { readWikiSourceRecord, updateWikiSourceRecord } from "@/lib/server/wiki-store";
+import { deleteWikiSourceRecord, readWikiSourceRecord, updateWikiSourceRecord } from "@/lib/server/wiki-store";
 import type { WikiSourceStatus } from "@/lib/wiki-types";
 
 type SourceUpdatePayload = {
@@ -10,7 +10,7 @@ type SourceUpdatePayload = {
 };
 
 function isWikiSourceStatus(value: unknown): value is WikiSourceStatus {
-  return value === "drafted" || value === "approved" || value === "rejected";
+  return value === "processing" || value === "drafted" || value === "approved" || value === "rejected" || value === "failed";
 }
 
 export const runtime = "nodejs";
@@ -50,6 +50,38 @@ export async function PATCH(
   } catch (error) {
     console.error("Wiki source update error:", error);
     return new Response(JSON.stringify({ error: "更新 KB 资料失败。" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+}
+
+export async function DELETE(
+  req: NextRequest,
+  context: { params: Promise<{ sourceId: string }> }
+) {
+  try {
+    await assertWikiAdminAccess(req);
+  } catch (error) {
+    return wikiAdminAuthErrorResponse(error, req);
+  }
+
+  try {
+    const { sourceId } = await context.params;
+    await deleteWikiSourceRecord(sourceId);
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "KB 资料不存在。") {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    console.error("Wiki source delete error:", error);
+    return new Response(JSON.stringify({ error: "删除 KB 资料失败。" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });

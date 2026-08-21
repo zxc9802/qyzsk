@@ -4,10 +4,13 @@ import { generateModelText } from "@/lib/server/model-text";
 import type {
   WikiCategory,
   WikiDraft,
+  WikiMediaAsset,
   WikiPageSearchDocument,
   WikiRelation,
+  WikiSourceRecord,
   WikiSubmitter,
 } from "@/lib/wiki-types";
+import { normalizeWikiMediaAssets } from "@/lib/wiki-types";
 import {
   createWikiDraft,
   createWikiSourceRecord,
@@ -371,49 +374,21 @@ export async function ingestWikiSource(options: {
   content: string;
   modelId?: string;
   submittedBy?: WikiSubmitter;
+  media?: WikiMediaAsset[];
 }) {
+  const media = normalizeWikiMediaAssets(options.media);
   const source = await createWikiSourceRecord({
     title: options.title,
     content: options.content,
     submittedBy: options.submittedBy,
+    media,
   });
 
-  const payloads = await generateDraftPayloads({
-    sourceTitle: source.title,
-    sourceContent: source.content,
+  const drafts = await createDraftsFromSource({
+    source,
     modelId: options.modelId,
+    submittedBy: options.submittedBy,
   });
-
-  const drafts: WikiDraft[] = [];
-  for (const payload of payloads) {
-    const resolvedTitle = payload.title?.trim() || source.title;
-    const resolvedCategory =
-      inferCategoryFromPageId(payload.targetPageId) ||
-      payload.category ||
-      heuristicCategory(source.title, source.content);
-
-    const relations = normalizeWikiRelations(payload.relations);
-    const draft = await createWikiDraft({
-      sourceId: source.id,
-      ...(payload.targetPageId ? { targetPageId: normalizePageId(payload.targetPageId) } : {}),
-      submittedBy: options.submittedBy,
-      title: resolvedTitle,
-      category: resolvedCategory,
-      summary: payload.summary?.trim() || buildFallbackSummary(payload.content || source.content),
-      roles: payload.roles?.filter(Boolean) || ["全员"],
-      sourceIds: payload.sourceIds?.filter(Boolean) || [],
-      relations,
-      relatedPages: deriveRelatedPageIds(relations, payload.relatedPages?.filter(Boolean) || []),
-      content: payload.content?.trim() || buildFallbackDraft(source.title, source.content).content || "",
-      proposedSlug:
-        payload.targetPageId?.trim()
-          ? normalizePageId(payload.targetPageId).split("/").slice(1).join("/")
-          : generateWikiId(resolvedCategory, resolvedTitle).split("/").slice(1).join("/"),
-      status: "draft",
-      notes: "",
-    });
-    drafts.push(draft);
-  }
 
   const refreshedSource = await readWikiSourceRecord(source.id);
 
@@ -422,6 +397,53 @@ export async function ingestWikiSource(options: {
     drafts,
     draft: drafts[0],
   };
+}
+
+export async function createDraftsFromSource(options: {
+  source: WikiSourceRecord;
+  modelId?: string;
+  submittedBy?: WikiSubmitter;
+}) {
+  const media = normalizeWikiMediaAssets(options.source.media);
+  const payloads = await generateDraftPayloads({
+    sourceTitle: options.source.title,
+    sourceContent: options.source.content,
+    modelId: options.modelId,
+  });
+
+  const drafts: WikiDraft[] = [];
+  for (const payload of payloads) {
+    const resolvedTitle = payload.title?.trim() || options.source.title;
+    const resolvedCategory =
+      inferCategoryFromPageId(payload.targetPageId) ||
+      payload.category ||
+      heuristicCategory(options.source.title, options.source.content);
+
+    const relations = normalizeWikiRelations(payload.relations);
+    const draft = await createWikiDraft({
+      sourceId: options.source.id,
+      ...(payload.targetPageId ? { targetPageId: normalizePageId(payload.targetPageId) } : {}),
+      submittedBy: options.submittedBy,
+      title: resolvedTitle,
+      category: resolvedCategory,
+      summary: payload.summary?.trim() || buildFallbackSummary(payload.content || options.source.content),
+      roles: payload.roles?.filter(Boolean) || ["全员"],
+      sourceIds: payload.sourceIds?.filter(Boolean) || [],
+      relations,
+      relatedPages: deriveRelatedPageIds(relations, payload.relatedPages?.filter(Boolean) || []),
+      content: payload.content?.trim() || buildFallbackDraft(options.source.title, options.source.content).content || "",
+      proposedSlug:
+        payload.targetPageId?.trim()
+          ? normalizePageId(payload.targetPageId).split("/").slice(1).join("/")
+          : generateWikiId(resolvedCategory, resolvedTitle).split("/").slice(1).join("/"),
+      status: "draft",
+      notes: "",
+      ...(media.length > 0 ? { media } : {}),
+    });
+    drafts.push(draft);
+  }
+
+  return drafts;
 }
 
 export async function approveIngestedWikiSource(result: { drafts: WikiDraft[] }) {
@@ -455,5 +477,8 @@ export function buildApprovedPageFromDraft(draft: WikiDraft) {
     createdAt: today,
     updatedAt: today,
     version: 1,
+    ...(normalizeWikiMediaAssets(draft.media).length > 0
+      ? { media: normalizeWikiMediaAssets(draft.media) }
+      : {}),
   };
 }

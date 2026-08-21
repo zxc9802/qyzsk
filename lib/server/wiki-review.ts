@@ -100,6 +100,7 @@ export async function applyWikiDraftAction(
           ...basePage,
           createdAt: existingPage.createdAt,
           version: existingPage.version + 1,
+          media: basePage.media && basePage.media.length > 0 ? basePage.media : existingPage.media,
         }
       : basePage;
     await writePublishedPage(page);

@@ -170,6 +170,20 @@ export async function replaceRagChunksForSource(options: {
   });
 }
 
+export async function deleteRagChunksForSource(options: {
+  sourceType: string;
+  sourceId: string;
+}) {
+  await ensureRagSchema();
+
+  await withDbClient(async (client) => {
+    await client.query("DELETE FROM kb_chat_rag_chunks WHERE source_type = $1 AND source_id = $2", [
+      options.sourceType,
+      options.sourceId,
+    ]);
+  });
+}
+
 export async function searchRagChunks(options: {
   queryEmbedding: number[];
   sourceType: string;

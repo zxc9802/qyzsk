@@ -9,9 +9,12 @@ import {
   AdminSearchInput,
   AdminStatsGrid,
   formatDate,
+  formatSourceStatusLabel,
+  SOURCE_STATUS_GROUPS,
   useDeferredSearchValue,
   useWikiAdminOverview,
 } from "@/components/admin/WikiAdminShared";
+import WikiMediaGallery from "@/components/admin/WikiMediaGallery";
 import { useAppViewer } from "@/lib/client/app-session";
 import type { WikiSourceRecord, WikiSourceStatus } from "@/lib/wiki-types";
 
@@ -27,12 +30,6 @@ function buildSourceEditorState(source: WikiSourceRecord): SourceEditorState {
     content: source.content,
     status: source.status,
   };
-}
-
-function formatSourceStatusLabel(status: WikiSourceStatus) {
-  if (status === "approved") return "已通过";
-  if (status === "rejected") return "已驳回";
-  return "待处理";
 }
 
 function formatSubmitterLabel(source: WikiSourceRecord) {
@@ -72,7 +69,8 @@ export default function AdminSourcesPage() {
       const nextEditors = { ...previous };
 
       sources.forEach((source) => {
-        if (!nextEditors[source.id]) {
+        const existing = nextEditors[source.id];
+        if (!existing || existing.status === "processing") {
           nextEditors[source.id] = buildSourceEditorState(source);
         }
       });
@@ -112,7 +110,7 @@ export default function AdminSourcesPage() {
 
   const groupedSources = useMemo(
     () =>
-      (["drafted", "approved", "rejected"] as const).map((status) => ({
+      SOURCE_STATUS_GROUPS.map((status) => ({
         status,
         sources: filteredSources.filter((source) => source.status === status),
       })).filter((group) => group.sources.length > 0),
@@ -176,6 +174,33 @@ export default function AdminSourcesPage() {
     }
   }
 
+  async function deleteSource(sourceId: string) {
+    const source = sources.find((item) => item.id === sourceId);
+    const confirmed = window.confirm(
+      `确定删除 KB 资料「${source?.title || sourceId}」？相关未发布草稿会一并删除，已发布 Wiki 页面会保留。此操作不可恢复。`
+    );
+    if (!confirmed) return;
+
+    setSavingSourceId(sourceId);
+    setSourceError(null);
+
+    try {
+      const response = await fetch(`/api/wiki/sources/${sourceId}`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.error || "删除 KB 资料失败。");
+      }
+
+      await loadOverview();
+    } catch (requestError) {
+      setSourceError(requestError instanceof Error ? requestError.message : "删除 KB 资料失败。");
+    } finally {
+      setSavingSourceId(null);
+    }
+  }
+
   if (sessionLoading || !isAdmin) {
     return (
       <div className="h-screen overflow-y-auto px-4 py-5 md:px-8 md:py-8">
@@ -193,7 +218,7 @@ export default function AdminSourcesPage() {
       <div className="mx-auto max-w-7xl space-y-6">
         <AdminPageHeader
           title="KB 资料库"
-          description="这里存放候选知识的原始资料，适合回溯知识来源、修正原文内容和手动调整资料状态。"
+          description="这里存放候选知识的原始资料，适合回溯知识来源、修正原文内容、调整资料状态，或随时删除不再需要的资料。"
           backHref="/admin"
           backLabel="返回审核台"
           extra={
@@ -321,6 +346,7 @@ export default function AdminSourcesPage() {
                           <select
                             value={editor.status}
                             onChange={(event) => updateSourceEditor(source.id, { status: event.target.value as WikiSourceStatus })}
+                            disabled={source.status === "processing"}
                             className="rounded-[16px] border px-4 py-3 text-sm outline-none"
                             style={{
                               borderColor: "var(--surface-outline-strong)",
@@ -328,10 +354,23 @@ export default function AdminSourcesPage() {
                               color: "var(--color-sidebar-text-bright)",
                             }}
                           >
+                            {source.status === "processing" ? <option value="processing">处理中</option> : null}
+                            {source.status === "failed" ? <option value="failed">处理失败</option> : null}
                             <option value="drafted">待处理</option>
                             <option value="approved">已通过</option>
                             <option value="rejected">已驳回</option>
                           </select>
+                          {source.ingestError ? (
+                            <div className="rounded-[16px] px-4 py-3 text-sm" style={{ color: "#fecaca", background: "rgba(127, 29, 29, 0.18)" }}>
+                              {source.ingestError}
+                            </div>
+                          ) : null}
+                          {source.ingestWarnings && source.ingestWarnings.length > 0 ? (
+                            <div className="rounded-[16px] px-4 py-3 text-sm" style={{ color: "var(--color-amber-soft)", background: "var(--chip-soft)" }}>
+                              {source.ingestWarnings.join("\n")}
+                            </div>
+                          ) : null}
+                          <WikiMediaGallery media={source.media} />
                           <textarea
                             value={editor.content}
                             onChange={(event) => updateSourceEditor(source.id, { content: event.target.value })}
@@ -345,10 +384,23 @@ export default function AdminSourcesPage() {
                           />
                         </div>
 
-                        <div className="mt-4 flex justify-end">
+                        <div className="mt-4 flex flex-wrap justify-end gap-2">
+                          <button
+                            onClick={() => void deleteSource(source.id)}
+                            disabled={savingSourceId === source.id || loading}
+                            className="rounded-full border px-4 py-2 text-sm disabled:cursor-default"
+                            style={{
+                              borderColor: "rgba(220, 38, 38, 0.96)",
+                              background: "linear-gradient(145deg, rgba(239, 68, 68, 0.96), rgba(185, 28, 28, 0.98))",
+                              color: "#ffffff",
+                              opacity: savingSourceId === source.id || loading ? 0.6 : 1,
+                            }}
+                          >
+                            删除资料
+                          </button>
                           <button
                             onClick={() => void saveSource(source.id)}
-                            disabled={savingSourceId === source.id || loading}
+                            disabled={savingSourceId === source.id || loading || source.status === "processing"}
                             className="rounded-full px-4 py-2 text-sm font-medium disabled:cursor-default"
                             style={{
                               background: "var(--brand-badge)",

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { extractApiErrorMessage, readJsonSafely, redirectToMainAppIfNeeded } from "@/lib/client/api-response";
+import { parseKbChatRoleAccess, type KbChatRoleAccess } from "@/lib/kb-chat-role-access";
 
 export type AppViewer = {
   id: string;
@@ -9,6 +10,7 @@ export type AppViewer = {
   nickname?: string;
   role?: string;
   groupName?: string;
+  kbChatRoles: KbChatRoleAccess;
 };
 
 type SessionResponsePayload = {
@@ -31,7 +33,7 @@ function normalizeViewer(user: Record<string, unknown> | undefined): AppViewer |
   const id = typeof user.id === "string" ? user.id.trim() : "";
   if (!id) return null;
 
-  const viewer: AppViewer = { id };
+  const viewer: AppViewer = { id, kbChatRoles: parseKbChatRoleAccess(user.kbChatRoles) };
   const account = typeof user.account === "string"
     ? user.account.trim()
     : typeof user.email === "string"

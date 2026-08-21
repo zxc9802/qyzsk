@@ -14,6 +14,7 @@ import {
   useDeferredSearchValue,
   useWikiAdminOverview,
 } from "@/components/admin/WikiAdminShared";
+import WikiMediaGallery from "@/components/admin/WikiMediaGallery";
 import { useAppViewer } from "@/lib/client/app-session";
 import { getWikiCategoryLabel } from "@/lib/wiki-category-labels";
 import type { WikiCategory } from "@/lib/wiki-types";
@@ -41,6 +42,7 @@ export default function AdminDraftsPage() {
     updateDraftEditor,
     savingDraftId,
     submitDraftAction,
+    deleteDraft,
     bulkApproving,
     approveAllDrafts,
   } = useWikiAdminOverview();
@@ -121,7 +123,7 @@ export default function AdminDraftsPage() {
       <div className="mx-auto max-w-7xl space-y-6">
         <AdminPageHeader
           title="待审核草稿"
-          description="这里保留完整的草稿编辑和发布能力。主审核台只做导航和总览，真正的审核动作都集中在这个页面里。"
+          description="这里保留完整的草稿编辑、发布和删除能力。主审核台只做导航和总览，真正的审核动作都集中在这个页面里。"
           backHref="/admin"
           backLabel="返回审核台"
           extra={
@@ -229,6 +231,7 @@ export default function AdminDraftsPage() {
                   </div>
 
                   <div className="mt-4 grid gap-3">
+                    <WikiMediaGallery media={draft.media} />
                     <input
                       value={editor.title}
                       onChange={(event) => updateDraftEditor(draft.id, { title: event.target.value })}
@@ -356,6 +359,19 @@ export default function AdminDraftsPage() {
                       }}
                     >
                       保存草稿
+                    </button>
+                    <button
+                      onClick={() => void deleteDraft(draft.id)}
+                      disabled={savingDraftId === draft.id}
+                      className="rounded-full border px-4 py-2 text-sm disabled:cursor-default"
+                      style={{
+                        borderColor: "rgba(220, 38, 38, 0.96)",
+                        background: "linear-gradient(145deg, rgba(239, 68, 68, 0.96), rgba(185, 28, 28, 0.98))",
+                        color: "#ffffff",
+                        opacity: savingDraftId === draft.id ? 0.6 : 1,
+                      }}
+                    >
+                      删除草稿
                     </button>
                     <button
                       onClick={() => void submitDraftAction(draft.id, "reject")}

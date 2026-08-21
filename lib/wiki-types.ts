@@ -1,6 +1,6 @@
 export type WikiCategory = "concepts" | "entities" | "roles" | "faq" | "synthesis";
 export type WikiDraftStatus = "draft" | "approved" | "rejected";
-export type WikiSourceStatus = "drafted" | "approved" | "rejected";
+export type WikiSourceStatus = "processing" | "drafted" | "approved" | "rejected" | "failed";
 export type WikiRelationType =
   | "prerequisite"
   | "depends_on"
@@ -36,6 +36,47 @@ export interface WikiSubmitter {
   groupName?: string;
 }
 
+export type WikiMediaKind = "document" | "image" | "video";
+
+export interface WikiMediaAsset {
+  id: string;
+  kind: WikiMediaKind;
+  name: string;
+  mimeType: string;
+  size: number;
+  summary?: string;
+}
+
+export function normalizeWikiMediaAssets(value: unknown): WikiMediaAsset[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const candidate = item as Partial<WikiMediaAsset>;
+      const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+      const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
+      const mimeType = typeof candidate.mimeType === "string" ? candidate.mimeType.trim() : "";
+      const kind = candidate.kind;
+      const size = typeof candidate.size === "number" && Number.isFinite(candidate.size) ? candidate.size : 0;
+      if (!id || !name || (kind !== "document" && kind !== "image" && kind !== "video")) {
+        return null;
+      }
+
+      const asset: WikiMediaAsset = {
+        id,
+        kind,
+        name,
+        mimeType: mimeType || "application/octet-stream",
+        size,
+      };
+      const summary = typeof candidate.summary === "string" ? candidate.summary.trim() : "";
+      if (summary) asset.summary = summary;
+      return asset;
+    })
+    .filter((item): item is WikiMediaAsset => Boolean(item));
+}
+
 export interface WikiPage {
   id: string;
   title: string;
@@ -49,6 +90,7 @@ export interface WikiPage {
   updatedAt: string;
   version: number;
   content: string;
+  media?: WikiMediaAsset[];
 }
 
 export interface WikiPageSearchDocument extends WikiPage {
@@ -73,6 +115,7 @@ export interface WikiDraft {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+  media?: WikiMediaAsset[];
 }
 
 export interface WikiSourceRecord {
@@ -84,6 +127,9 @@ export interface WikiSourceRecord {
   submittedBy?: WikiSubmitter;
   createdAt: string;
   updatedAt: string;
+  media?: WikiMediaAsset[];
+  ingestError?: string;
+  ingestWarnings?: string[];
 }
 
 export interface WikiStats {

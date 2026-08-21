@@ -6,15 +6,18 @@ import { promisify } from "util";
 import mammoth from "mammoth";
 import sharp from "sharp";
 import {
-  ConversationFileRecord,
-  FileKind,
-  FileSegment,
   generateServerId,
   getFileRecord,
   saveFileRecord,
   saveFileSegments,
 } from "@/lib/server/file-store";
+import { uploadConversationFileToCos } from "@/lib/server/cos";
+import type { ConversationFileRecord, FileKind, FileSegment } from "@/lib/server/file-store";
 import { generateGeminiText, geminiConfigured } from "@/lib/server/newapi-gemini";
+import { embedAndStoreUploadVector } from "@/lib/server/upload-embeddings";
+import { FILE_LIMITS, formatBytes, UPLOAD_FILE_ACCEPT, UPLOAD_FILE_ACCEPT_LABEL } from "@/lib/upload-accept";
+
+export { FILE_LIMITS, formatBytes, UPLOAD_FILE_ACCEPT, UPLOAD_FILE_ACCEPT_LABEL };
 
 const execFileAsync = promisify(execFile);
 const nodeRequire = createRequire(import.meta.url);
@@ -42,11 +45,26 @@ type ProcessedUploadResult = {
   segments: FileSegment[];
 };
 
-export const FILE_LIMITS = {
-  document: 100 * 1024 * 1024,
-  image: 20 * 1024 * 1024,
-  video: 500 * 1024 * 1024,
-};
+export function normalizeUploadMimeType(fileName: string, mimeType?: string): string {
+  if (mimeType && mimeType !== "application/octet-stream") return mimeType;
+
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".docx")) {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+  if (lower.endsWith(".doc")) return "application/msword";
+  if (lower.endsWith(".txt")) return "text/plain";
+  if (lower.endsWith(".md")) return "text/markdown";
+  if (lower.endsWith(".mp4")) return "video/mp4";
+  if (lower.endsWith(".webm")) return "video/webm";
+  if (lower.endsWith(".mov")) return "video/quicktime";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  return "application/octet-stream";
+}
 
 export function inferUploadKind(fileName: string, mimeType: string): FileKind | null {
   const ext = path.extname(fileName).toLowerCase();
@@ -56,14 +74,18 @@ export function inferUploadKind(fileName: string, mimeType: string): FileKind | 
     normalizedMime === "application/pdf" ||
     normalizedMime === "application/msword" ||
     normalizedMime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    [".pdf", ".doc", ".docx"].includes(ext)
+    normalizedMime === "text/plain" ||
+    normalizedMime === "text/markdown" ||
+    [".pdf", ".doc", ".docx", ".txt", ".md"].includes(ext)
   ) {
     return "document";
   }
 
   if (
     normalizedMime === "video/mp4" ||
-    ext === ".mp4"
+    normalizedMime === "video/webm" ||
+    normalizedMime === "video/quicktime" ||
+    [".mp4", ".webm", ".mov"].includes(ext)
   ) {
     return "video";
   }
@@ -71,19 +93,14 @@ export function inferUploadKind(fileName: string, mimeType: string): FileKind | 
   if (
     normalizedMime === "image/png" ||
     normalizedMime === "image/jpeg" ||
-    [".png", ".jpg", ".jpeg"].includes(ext)
+    normalizedMime === "image/webp" ||
+    normalizedMime === "image/gif" ||
+    [".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext)
   ) {
     return "image";
   }
 
   return null;
-}
-
-export function formatBytes(size: number): string {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 export async function processUploadedFile(
@@ -98,7 +115,13 @@ export async function processUploadedFile(
           : await processVideo(record);
 
     const persisted = await persistProcessedFile(record, processed.record, processed.segments);
-    return persisted ?? processed.record;
+    const readyRecord = persisted ?? processed.record;
+    if (readyRecord.status === "ready") {
+      await embedProcessedUpload(readyRecord, processed.segments).catch((error) => {
+        console.error("Upload embedding error:", readyRecord.id, error);
+      });
+    }
+    return readyRecord;
   } catch (error) {
     const message = error instanceof Error ? error.message : "文件处理失败";
     const latestRecord = await getFileRecord(record.userId, record.conversationId, record.id);
@@ -125,6 +148,65 @@ export async function processUploadedFile(
   }
 }
 
+export async function processStandaloneFile(options: {
+  fileName: string;
+  mimeType: string;
+  storagePath: string;
+  kind: FileKind;
+}): Promise<{
+  summary: string;
+  excerpt: string;
+  text: string;
+  segments: FileSegment[];
+  metadata: ConversationFileRecord["metadata"];
+}> {
+  const record: ConversationFileRecord = {
+    id: generateServerId(),
+    userId: "wiki",
+    conversationId: "ingest",
+    name: options.fileName,
+    mimeType: options.mimeType,
+    size: 0,
+    kind: options.kind,
+    status: "processing",
+    active: true,
+    storagePath: options.storagePath,
+    summary: "",
+    excerpt: "",
+    segmentCount: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    metadata: {
+      extension: path.extname(options.fileName).toLowerCase() || undefined,
+    },
+  };
+
+  const processed =
+    options.kind === "document"
+      ? await processDocument(record)
+      : options.kind === "image"
+        ? await processImage(record)
+        : await processVideo(record);
+
+  return {
+    summary: processed.record.summary,
+    excerpt: processed.record.excerpt,
+    text: processed.segments.map((segment) => segment.content).filter(Boolean).join("\n\n"),
+    segments: processed.segments,
+    metadata: processed.record.metadata,
+  };
+}
+
+async function embedProcessedUpload(record: ConversationFileRecord, segments: FileSegment[]) {
+  await embedAndStoreUploadVector({
+    storageDir: path.dirname(record.storagePath),
+    title: record.name,
+    text: [record.summary, ...segments.map((segment) => segment.content)].filter(Boolean).join("\n\n"),
+    kind: record.kind,
+    storagePath: record.storagePath,
+  });
+}
+
 async function persistProcessedFile(
   originalRecord: ConversationFileRecord,
   processedRecord: ConversationFileRecord,
@@ -133,12 +215,12 @@ async function persistProcessedFile(
   const latestRecord = await getFileRecord(originalRecord.userId, originalRecord.conversationId, originalRecord.id);
   if (!latestRecord) return null;
 
-  const mergedRecord: ConversationFileRecord = {
+  const mergedRecord: ConversationFileRecord = await uploadConversationFileToCos({
     ...processedRecord,
     active: latestRecord.active,
     createdAt: latestRecord.createdAt,
     updatedAt: Date.now(),
-  };
+  });
 
   await saveFileRecord(mergedRecord);
   await saveFileSegments(originalRecord.userId, originalRecord.conversationId, originalRecord.id, segments);

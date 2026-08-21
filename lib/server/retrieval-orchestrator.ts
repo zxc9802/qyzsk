@@ -1,5 +1,6 @@
 import type { KnowledgeMode } from "@/lib/knowledge-mode";
-import type { KnowledgeBaseHit, QuestionDiagnosis, RetrievalSourceHit } from "@/lib/types";
+import type { ChatMediaItem, KnowledgeBaseHit, QuestionDiagnosis, RetrievalSourceHit } from "@/lib/types";
+import { mergeChatMediaItems, toWikiChatMediaItems } from "@/lib/server/chat-media";
 import type { WikiPageSearchDocument } from "@/lib/wiki-types";
 import {
   buildKnowledgeBaseContextFromEntries,
@@ -177,13 +178,17 @@ function buildWikiContext(pages: WikiPageSearchDocument[]) {
   const blocks = pages.map((page) => {
     const body = trimForContext(page.content, 1800);
     const related = page.relatedPages.length > 0 ? `\n相关页面：${page.relatedPages.join("、")}` : "";
+    const mediaNote =
+      page.media && page.media.length > 0
+        ? `\n相关媒体：${page.media.map((item) => `${item.kind} ${item.name}`).join("、")}。这些图片或视频会展示在聊天框中，请结合它们回答。`
+        : "";
 
     return [
       `页面：${page.title} (${page.id})`,
       `摘要：${page.summary || "暂无摘要"}`,
       page.roles.length > 0 ? `适用岗位：${page.roles.join("、")}` : "",
       page.sourceIds.length > 0 ? `来源条目：${page.sourceIds.join("、")}` : "",
-      `正文：\n${body}${related}`,
+      `正文：\n${body}${related}${mediaNote}`,
     ]
       .filter(Boolean)
       .join("\n");
@@ -604,7 +609,7 @@ export async function buildRetrievalOrchestratorResult(options: {
   const fileRetrieval =
     options.userId && options.conversationId && options.conversationId.trim()
       ? await buildConversationFileRetrieval(options.userId, options.conversationId, retrievalQuery)
-      : { context: "", hits: [] as RetrievalSourceHit[] };
+      : { context: "", hits: [] as RetrievalSourceHit[], mediaItems: [] as ChatMediaItem[] };
 
   const knowledgeSegments = [wikiContext, kbContext].filter(Boolean);
   let combinedKnowledgeContext = knowledgeSegments.join("\n\n");
@@ -636,6 +641,11 @@ export async function buildRetrievalOrchestratorResult(options: {
     fileContext: fileRetrieval.context,
     sourceHits,
     kbHits,
+    mediaItems: mergeChatMediaItems([
+      selectedWikiPages.flatMap((page) => toWikiChatMediaItems(page.media)),
+      valueWikiPages.flatMap((page) => toWikiChatMediaItems(page.media)),
+      fileRetrieval.mediaItems,
+    ]),
     usedWiki: selectedWikiPages.length > 0 || valueWikiPages.length > 0,
   };
 }

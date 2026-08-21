@@ -18,6 +18,7 @@ import {
 } from "@/lib/knowledge-mode";
 import { DEFAULT_THEME_MODE, isThemeMode, type ThemeMode } from "@/lib/theme";
 import type {
+  ChatMediaItem,
   Conversation,
   KnowledgeBaseHit,
   Message,
@@ -25,6 +26,7 @@ import type {
   RetrievalSourceHit,
   UserSettings,
 } from "@/lib/types";
+import { sanitizeChatMediaItem } from "@/lib/server/chat-media";
 import { isDatabaseConfigured, withDbClient } from "@/lib/server/db";
 import { STORAGE_ROOT } from "@/lib/server/file-store";
 
@@ -259,6 +261,12 @@ function sanitizeMessage(value: unknown, fallbackTimestamp: number): Message | n
     message.sourceHits = candidate.sourceHits
       .map((item) => sanitizeSourceHit(item))
       .filter((item): item is RetrievalSourceHit => Boolean(item));
+  }
+
+  if (Array.isArray(candidate.mediaItems)) {
+    message.mediaItems = candidate.mediaItems
+      .map((item) => sanitizeChatMediaItem(item))
+      .filter((item): item is ChatMediaItem => Boolean(item));
   }
 
   const diagnosis = sanitizeDiagnosis(candidate.questionDiagnosis);

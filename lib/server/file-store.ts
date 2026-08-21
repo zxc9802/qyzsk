@@ -3,6 +3,7 @@ import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import type { ReadableStream as NodeReadableStream } from "stream/web";
 import path from "path";
+import { deleteCosKeys } from "@/lib/server/cos";
 
 export const STORAGE_ROOT = path.join(process.cwd(), ".kb-chat-data");
 export const MAX_ACTIVE_FILES = 3;
@@ -22,6 +23,8 @@ export interface ConversationFileRecord {
   status: FileStatus;
   active: boolean;
   storagePath: string;
+  remoteKey?: string;
+  posterRemoteKey?: string;
   summary: string;
   excerpt: string;
   segmentCount: number;
@@ -139,10 +142,22 @@ export function inferExtension(fileName: string, mimeType: string): string {
       return ".docx";
     case "video/mp4":
       return ".mp4";
+    case "video/webm":
+      return ".webm";
+    case "video/quicktime":
+      return ".mov";
     case "image/png":
       return ".png";
     case "image/jpeg":
       return ".jpg";
+    case "image/webp":
+      return ".webp";
+    case "image/gif":
+      return ".gif";
+    case "text/plain":
+      return ".txt";
+    case "text/markdown":
+      return ".md";
     default:
       return "";
   }
@@ -328,6 +343,8 @@ export async function enforceActiveFileLimit(
 }
 
 export async function deleteConversationFiles(userId: string, conversationId: string) {
+  const files = await listConversationFiles(userId, conversationId);
+  await deleteCosKeys(files.flatMap((file) => [file.remoteKey, file.posterRemoteKey]));
   await fs.rm(userConversationDir(userId, conversationId), { recursive: true, force: true });
 }
 
@@ -336,6 +353,10 @@ export async function deleteConversationFile(
   conversationId: string,
   fileId: string
 ): Promise<void> {
+  const record = await getFileRecord(userId, conversationId, fileId);
+  if (record) {
+    await deleteCosKeys([record.remoteKey, record.posterRemoteKey]);
+  }
   await fs.rm(fileDir(userId, conversationId, fileId), { recursive: true, force: true });
 }
 

@@ -24,6 +24,20 @@ export interface RetrievalSourceHit {
   publishedAt?: string;
 }
 
+export type ChatMediaKind = "image" | "video";
+export type ChatMediaSource = "wiki" | "file";
+
+export interface ChatMediaItem {
+  id: string;
+  kind: ChatMediaKind;
+  name: string;
+  mimeType: string;
+  url: string;
+  posterUrl?: string;
+  caption?: string;
+  source: ChatMediaSource;
+}
+
 export interface QuestionDiagnosis {
   categoryId: string;
   categoryLabel: string;
@@ -47,6 +61,7 @@ export interface Message {
   modelId?: ChatModelId | string;
   kbHits?: KnowledgeBaseHit[];
   sourceHits?: RetrievalSourceHit[];
+  mediaItems?: ChatMediaItem[];
   questionDiagnosis?: QuestionDiagnosis;
 }
 

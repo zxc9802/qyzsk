@@ -14,6 +14,7 @@ export type AppSessionUserSnapshot = {
   nickname?: string;
   role?: string;
   groupName?: string;
+  billingAudience?: "internal" | "external";
 };
 
 export type AppSession = {
@@ -394,6 +395,7 @@ export function buildLocalDevPublicSessionData() {
       id: "kb-chat-local-dev-user",
       account: "local-admin@localhost",
       nickname: "本地调试管理员",
+      billingAudience: "internal",
       role: "admin",
     },
     mainAppUrl: getConfiguredMainAppUrl() || "http://localhost:3000",
@@ -429,6 +431,8 @@ export function buildAppSessionUserSnapshot(session: AppSession | null): AppSess
   const groupName = typeof user.groupName === "string" ? user.groupName.trim() : "";
   if (groupName) snapshot.groupName = groupName;
 
+  snapshot.billingAudience = user.billingAudience === "internal" ? "internal" : "external";
+
   return snapshot;
 }
 
@@ -452,6 +456,7 @@ export async function assertAppUserSession(request: Pick<Request, "url" | "heade
       user: {
         userId: "kb-chat-local-dev-user",
         nickname: "本地调试用户",
+        billingAudience: "internal",
         role: "admin",
       } satisfies AppSessionUserSnapshot,
     };

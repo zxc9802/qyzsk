@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "fs";
 import path from "path";
 import {
@@ -5,16 +6,20 @@ import {
   deriveRelatedPageIds,
   normalizeWikiRelations,
 } from "@/lib/wiki-relations";
-import type {
-  WikiCategory,
-  WikiDraft,
-  WikiPage,
-  WikiPageSearchDocument,
-  WikiSourceRecord,
-  WikiSourceStatus,
-  WikiStats,
-  WikiSubmitter,
+import {
+  normalizeWikiMediaAssets,
+  type WikiCategory,
+  type WikiDraft,
+  type WikiMediaAsset,
+  type WikiPage,
+  type WikiPageSearchDocument,
+  type WikiSourceRecord,
+  type WikiSourceStatus,
+  type WikiStats,
+  type WikiSubmitter,
 } from "@/lib/wiki-types";
+import { deleteCosKeys } from "@/lib/server/cos";
+import { STORAGE_ROOT } from "@/lib/server/file-store";
 
 const PUBLISHED_ROOT = path.join(process.cwd(), "wiki");
 const WORKSPACE_ROOT = path.join(process.cwd(), ".kb-chat-data", "wiki");
@@ -26,6 +31,7 @@ const INDEX_META_PATH = path.join(CACHE_ROOT, "published-index.meta.json");
 const WIKI_LOG_PATH = path.join(PUBLISHED_ROOT, "_log.md");
 const WIKI_SCHEMA_PATH = path.join(PUBLISHED_ROOT, "_schema.md");
 const WIKI_INDEX_PATH = path.join(PUBLISHED_ROOT, "_index.md");
+const WIKI_MEDIA_ROOT = path.join(STORAGE_ROOT, "wiki", "media");
 
 const WIKI_CATEGORIES: WikiCategory[] = ["concepts", "entities", "roles", "faq", "synthesis"];
 const SEEDED_WIKI_PAGE_IDS = new Set([
@@ -131,9 +137,27 @@ function normalizeSubmitter(value: unknown): WikiSubmitter | undefined {
 }
 
 function normalizeWikiSourceRecord(record: WikiSourceRecord): WikiSourceRecord {
+  const media = normalizeWikiMediaAssets(record.media);
+  const ingestError = typeof record.ingestError === "string" ? record.ingestError.trim() : "";
+  const ingestWarnings = Array.isArray(record.ingestWarnings)
+    ? record.ingestWarnings.map(String).map((item) => item.trim()).filter(Boolean)
+    : [];
+  const status: WikiSourceRecord["status"] =
+    record.status === "processing" ||
+    record.status === "drafted" ||
+    record.status === "approved" ||
+    record.status === "rejected" ||
+    record.status === "failed"
+      ? record.status
+      : "drafted";
+
   return {
     ...record,
+    status,
     submittedBy: normalizeSubmitter(record.submittedBy),
+    ...(media.length > 0 ? { media } : { media: undefined }),
+    ...(ingestError ? { ingestError } : { ingestError: undefined }),
+    ...(ingestWarnings.length > 0 ? { ingestWarnings } : { ingestWarnings: undefined }),
   };
 }
 
@@ -149,12 +173,14 @@ function normalizeWikiDraftRecord(draft: WikiDraft): WikiDraft {
   );
   const targetPageId = typeof draft.targetPageId === "string" ? normalizePageId(draft.targetPageId) : "";
 
+  const media = normalizeWikiMediaAssets(draft.media);
   return {
     ...draft,
     submittedBy: normalizeSubmitter(draft.submittedBy),
     ...(targetPageId ? { targetPageId } : {}),
     relatedPages,
     relations: relations.length > 0 ? relations : buildSeeAlsoRelations(relatedPages),
+    ...(media.length > 0 ? { media } : { media: undefined }),
   };
 }
 
@@ -169,7 +195,7 @@ async function ensureDir(dirPath: string) {
 
 async function writeJson(filePath: string, data: unknown) {
   await ensureDir(path.dirname(filePath));
-  const tempPath = `${filePath}.tmp-${Date.now()}`;
+  const tempPath = `${filePath}.tmp-${randomUUID()}`;
   await fs.writeFile(tempPath, JSON.stringify(data, null, 2), "utf8");
   await fs.rename(tempPath, filePath);
 }
@@ -200,6 +226,7 @@ function serializeFrontmatter(page: Omit<WikiPage, "content">): string {
     `created_at: ${JSON.stringify(page.createdAt)}`,
     `updated_at: ${JSON.stringify(page.updatedAt)}`,
     `version: ${page.version}`,
+    ...(page.media && page.media.length > 0 ? [`media: ${JSON.stringify(page.media)}`] : []),
     "---",
   ].join("\n");
 }
@@ -265,6 +292,7 @@ function parseMarkdownPage(raw: string, filePath: string): WikiPageSearchDocumen
     updatedAt: String(frontmatter.updated_at || ""),
     version: typeof frontmatter.version === "number" ? frontmatter.version : 1,
     content: match[2].trim(),
+    media: normalizeWikiMediaAssets(frontmatter.media),
     filePath,
   };
 }
@@ -410,6 +438,94 @@ async function syncPublishedWikiPageToRagIfAvailable(page: WikiPage) {
   }
 }
 
+async function removePublishedWikiPageFromRagIfAvailable(pageId: string) {
+  const modulePath = ["@/lib/server", "rag-indexer"].join("/");
+
+  try {
+    const ragModule = await import(modulePath);
+    await ragModule.removePublishedWikiPageFromRag(pageId);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message.includes(modulePath) || error.message.includes("rag-indexer"))
+    ) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+async function rebuildPublishedIndex() {
+  const pages = (await readPublishedPagesUncached()).map((page) => normalizePublishedSearchDocument(page));
+  await writeJson(INDEX_CACHE_PATH, pages);
+  await writeJson(INDEX_META_PATH, { fingerprint: await computePublishedFingerprint() });
+  await fs.writeFile(WIKI_INDEX_PATH, buildIndexMarkdown(pages), "utf8");
+  return pages;
+}
+
+async function collectReferencedMediaIds(exclude: {
+  pageId?: string;
+  sourceId?: string;
+  draftIds?: string[];
+}) {
+  const excludedDraftIds = new Set(exclude.draftIds || []);
+  const [pages, sources, drafts] = await Promise.all([
+    readPublishedPagesUncached(),
+    listWikiSourceRecords(),
+    listWikiDrafts(),
+  ]);
+  const ids = new Set<string>();
+  const add = (media?: WikiMediaAsset[]) => {
+    for (const item of normalizeWikiMediaAssets(media)) {
+      ids.add(item.id);
+    }
+  };
+
+  for (const page of pages) {
+    if (page.id !== exclude.pageId) add(page.media);
+  }
+  for (const source of sources) {
+    if (source.id !== exclude.sourceId) add(source.media);
+  }
+  for (const draft of drafts) {
+    if (excludedDraftIds.has(draft.id)) continue;
+    if (exclude.sourceId && draft.sourceId === exclude.sourceId) continue;
+    add(draft.media);
+  }
+
+  return ids;
+}
+
+function wikiMediaDir(mediaId: string) {
+  const id = mediaId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 120) || "default";
+  return path.join(WIKI_MEDIA_ROOT, id);
+}
+
+async function readWikiMediaRemoteKeys(mediaId: string): Promise<string[]> {
+  try {
+    const raw = await fs.readFile(path.join(wikiMediaDir(mediaId), "meta.json"), "utf8");
+    const meta = JSON.parse(raw) as { remoteKey?: unknown; posterRemoteKey?: unknown };
+    return [meta.remoteKey, meta.posterRemoteKey].filter(
+      (key): key is string => typeof key === "string" && Boolean(key.trim())
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function deleteUnreferencedMedia(media: WikiMediaAsset[] | undefined, referenced: Set<string>) {
+  await Promise.all(
+    normalizeWikiMediaAssets(media)
+      .filter((item) => !referenced.has(item.id))
+      .map(async (item) => {
+        const keys = await readWikiMediaRemoteKeys(item.id);
+        await deleteCosKeys(keys);
+        await fs.rm(wikiMediaDir(item.id), { recursive: true, force: true });
+      })
+  );
+}
+
 export function generateWikiId(category: WikiCategory, title: string) {
   return `${category}/${sanitizePageSegment(title)}`;
 }
@@ -533,6 +649,50 @@ export async function writePublishedPage(page: WikiPage) {
   });
 }
 
+export async function deletePublishedPage(pageId: string) {
+  const page = await readPublishedPage(pageId);
+  if (!page) {
+    throw new Error("Wiki 页面不存在。");
+  }
+
+  const referencedMediaIds = await collectReferencedMediaIds({ pageId: page.id });
+  await deleteUnreferencedMedia(page.media, referencedMediaIds);
+  await fs.rm(publishedFilePath(page.id), { force: true });
+
+  const remainingPages = (await readPublishedPagesUncached()).filter((item) => item.id !== page.id);
+  await Promise.all(
+    remainingPages.map(async (other) => {
+      const nextRelations = other.relations.filter((relation) => relation.targetId !== page.id);
+      const nextRelatedPages = deriveRelatedPageIds(
+        nextRelations,
+        other.relatedPages.filter((relatedId) => relatedId !== page.id)
+      );
+      if (
+        nextRelations.length === other.relations.length &&
+        nextRelatedPages.join("\n") === other.relatedPages.join("\n")
+      ) {
+        return;
+      }
+
+      await fs.writeFile(
+        publishedFilePath(other.id),
+        buildMarkdownPage({
+          ...other,
+          relations: nextRelations,
+          relatedPages: nextRelatedPages,
+        }),
+        "utf8"
+      );
+    })
+  );
+
+  await rebuildPublishedIndex();
+  await appendWikiLog(`delete | ${page.id}\n- 标题：${page.title}`);
+  await removePublishedWikiPageFromRagIfAvailable(page.id).catch((error) => {
+    console.error("Published wiki page RAG delete failed:", page.id, error);
+  });
+}
+
 export async function appendWikiLog(entry: string) {
   await ensureWikiWorkspace();
   const heading = `## [${todayString()}] ${entry.trim()}\n`;
@@ -550,17 +710,21 @@ export async function createWikiSourceRecord(input: {
   title: string;
   content: string;
   submittedBy?: WikiSubmitter;
+  media?: WikiMediaAsset[];
+  status?: WikiSourceStatus;
 }): Promise<WikiSourceRecord> {
   await ensureWikiWorkspace();
+  const media = normalizeWikiMediaAssets(input.media);
   const source: WikiSourceRecord = {
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
     title: input.title.trim() || "未命名资料",
     content: input.content.trim(),
-    status: "drafted",
+    status: input.status || "drafted",
     draftIds: [],
     submittedBy: normalizeSubmitter(input.submittedBy),
     createdAt: nowIso(),
     updatedAt: nowIso(),
+    ...(media.length > 0 ? { media } : {}),
   };
   await writeJson(sourcePath(source.id), source);
   return source;
@@ -596,6 +760,28 @@ export async function listWikiSourceRecords(): Promise<WikiSourceRecord[]> {
     if (nodeError.code === "ENOENT") return [];
     throw error;
   }
+}
+
+export async function deleteWikiSourceRecord(sourceId: string) {
+  const source = await readWikiSourceRecord(sourceId);
+  if (!source) {
+    throw new Error("KB 资料不存在。");
+  }
+
+  const relatedDrafts = (await listWikiDrafts()).filter(
+    (draft) => draft.sourceId === source.id || source.draftIds.includes(draft.id)
+  );
+  const referencedMediaIds = await collectReferencedMediaIds({
+    sourceId: source.id,
+    draftIds: relatedDrafts.map((draft) => draft.id),
+  });
+  await deleteUnreferencedMedia(
+    [...normalizeWikiMediaAssets(source.media), ...relatedDrafts.flatMap((draft) => normalizeWikiMediaAssets(draft.media))],
+    referencedMediaIds
+  );
+  await Promise.all(relatedDrafts.map((draft) => fs.rm(draftPath(draft.id), { force: true })));
+  await fs.rm(sourcePath(source.id), { force: true });
+  await appendWikiLog(`delete-source | ${source.id}\n- 标题：${source.title}`);
 }
 
 export async function updateWikiSourceRecord(
@@ -745,6 +931,23 @@ export async function updateWikiDraft(
   const normalizedNext = normalizeWikiDraftRecord(next);
   await writeJson(draftPath(draftId), normalizedNext);
   return normalizedNext;
+}
+
+export async function deleteWikiDraft(draftId: string) {
+  const draft = await readWikiDraft(draftId);
+  if (!draft) {
+    throw new Error("Wiki 草稿不存在。");
+  }
+
+  await fs.rm(draftPath(draft.id), { force: true });
+  const source = await readWikiSourceRecord(draft.sourceId);
+  if (source) {
+    await updateWikiSourceRecord(source.id, (current) => ({
+      ...current,
+      draftIds: current.draftIds.filter((id) => id !== draft.id),
+    }));
+  }
+  await appendWikiLog(`delete-draft | ${draft.id}\n- 标题：${draft.title}`);
 }
 
 export async function upsertWikiDraftByPageId(

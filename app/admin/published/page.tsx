@@ -15,6 +15,7 @@ import {
   useDeferredSearchValue,
   useWikiAdminOverview,
 } from "@/components/admin/WikiAdminShared";
+import WikiMediaGallery from "@/components/admin/WikiMediaGallery";
 import { useAppViewer } from "@/lib/client/app-session";
 import { getWikiCategoryLabel } from "@/lib/wiki-category-labels";
 import type { WikiPage } from "@/lib/wiki-types";
@@ -199,6 +200,33 @@ export default function AdminPublishedPage() {
     }
   }
 
+  async function deletePage(pageId: string) {
+    const page = publishedPages.find((item) => item.id === pageId);
+    const confirmed = window.confirm(
+      `确定删除已发布页面「${page?.title || pageId}」？页面会从 Wiki 和检索中移除，此操作不可恢复。`
+    );
+    if (!confirmed) return;
+
+    setSavingPageId(pageId);
+    setPageError(null);
+
+    try {
+      const response = await fetch(`/api/wiki/pages/${pageId}`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.error || "删除 Wiki 页面失败。");
+      }
+
+      await loadOverview();
+    } catch (requestError) {
+      setPageError(requestError instanceof Error ? requestError.message : "删除 Wiki 页面失败。");
+    } finally {
+      setSavingPageId(null);
+    }
+  }
+
   if (sessionLoading || !isAdmin) {
     return (
       <div className="h-screen overflow-y-auto px-4 py-5 md:px-8 md:py-8">
@@ -216,7 +244,7 @@ export default function AdminPublishedPage() {
       <div className="mx-auto max-w-7xl space-y-6">
         <AdminPageHeader
           title="Wiki 页面库"
-          description="这里按正式 Wiki 分类组织，适合按页面维度搜索、定位和直接修改已发布内容。页面 ID 保持稳定，方便长期引用。"
+          description="这里按正式 Wiki 分类组织，适合按页面维度搜索、定位、修改或删除已发布内容。页面 ID 保持稳定，方便长期引用。"
           backHref="/admin"
           backLabel="返回审核台"
           extra={
@@ -330,6 +358,7 @@ export default function AdminPublishedPage() {
                         </div>
 
                         <div className="mt-4 grid gap-3">
+                          <WikiMediaGallery media={page.media} />
                           <input
                             value={editor.title}
                             onChange={(event) => updatePageEditor(page.id, { title: event.target.value })}
@@ -411,7 +440,20 @@ export default function AdminPublishedPage() {
                           />
                         </div>
 
-                        <div className="mt-4 flex justify-end">
+                        <div className="mt-4 flex flex-wrap justify-end gap-2">
+                          <button
+                            onClick={() => void deletePage(page.id)}
+                            disabled={savingPageId === page.id || loading}
+                            className="rounded-full border px-4 py-2 text-sm disabled:cursor-default"
+                            style={{
+                              borderColor: "rgba(220, 38, 38, 0.96)",
+                              background: "linear-gradient(145deg, rgba(239, 68, 68, 0.96), rgba(185, 28, 28, 0.98))",
+                              color: "#ffffff",
+                              opacity: savingPageId === page.id || loading ? 0.6 : 1,
+                            }}
+                          >
+                            删除页面
+                          </button>
                           <button
                             onClick={() => void savePage(page.id)}
                             disabled={savingPageId === page.id || loading}
