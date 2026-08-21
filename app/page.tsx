@@ -1,15 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { DEFAULT_ANSWER_MODE, isAnswerMode, type AnswerMode } from "@/lib/answer-modes";
 import type { ChatStatePayload } from "@/lib/chat-state";
 import { DEFAULT_CHAT_MODEL_ID, isChatModelId, type ChatModelId } from "@/lib/chat-models";
 import { DEFAULT_KNOWLEDGE_MODE } from "@/lib/knowledge-mode";
 import { DEFAULT_THEME_MODE, isThemeMode, type ThemeMode } from "@/lib/theme";
-import { Conversation, ConversationFile, Message } from "@/lib/types";
+import { Conversation, ConversationFile, Message, ROLES } from "@/lib/types";
 import { ConversationReport } from "@/lib/report";
 import { sanitizeAssistantOutput } from "@/lib/sanitize-assistant-output";
 import { extractApiErrorMessage, readJsonSafely, redirectToMainAppIfNeeded } from "@/lib/client/api-response";
+import { useAppViewer } from "@/lib/client/app-session";
+import { filterVisibleKbChatRoles } from "@/lib/kb-chat-role-access";
 import {
   createConversation, addMessage, updateLastAssistantMessage, deleteConversation,
   generateId,
@@ -57,6 +59,11 @@ function buildUploadStatus(files: ConversationFile[]): string | null {
 }
 
 export default function Home() {
+  const { viewer, loading: viewerLoading } = useAppViewer();
+  const allowedRoles = useMemo(
+    () => filterVisibleKbChatRoles(ROLES, viewer?.kbChatRoles),
+    [viewer?.kbChatRoles],
+  );
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
@@ -343,7 +350,37 @@ export default function Home() {
     };
   }, [activeId, conversations]);
 
+  useEffect(() => {
+    if (viewerLoading || !stateReady) return;
+
+    if (allowedRoles.length === 0) {
+      setRole(null);
+      setRoleName("选择岗位");
+      setShowRoleModal(false);
+      return;
+    }
+
+    const current = allowedRoles.find((item) => item.id === role);
+    if (current) {
+      setRoleName(current.name);
+      setShowRoleModal(false);
+      return;
+    }
+
+    if (allowedRoles.length === 1) {
+      setRole(allowedRoles[0].id);
+      setRoleName(allowedRoles[0].name);
+      setShowRoleModal(false);
+      return;
+    }
+
+    setRole(null);
+    setRoleName("选择岗位");
+    setShowRoleModal(true);
+  }, [allowedRoles, role, stateReady, viewerLoading]);
+
   const handleRoleSelect = (roleId: string, name: string) => {
+    if (!allowedRoles.some((item) => item.id === roleId)) return;
     setRole(roleId);
     setRoleName(name);
     setShowRoleModal(false);
@@ -495,7 +532,7 @@ export default function Home() {
   }, [activeId]);
 
   const handleSend = useCallback(async (text: string) => {
-    if (isStreaming) return;
+    if (isStreaming || !role) return;
 
     const { conversationId, conversationList } = ensureConversationContext();
     let currentConvos = conversationList;
@@ -641,7 +678,7 @@ export default function Home() {
   }, [ensureConversationContext, isStreaming, role, selectedModelId, selectedAnswerMode, webSearchEnabled]);
 
   const handleGenerateReport = useCallback(async () => {
-    if (!activeConvo || isGeneratingReport || isStreaming) return;
+    if (!activeConvo || isGeneratingReport || isStreaming || !role) return;
 
     setIsReportModalOpen(true);
     setIsGeneratingReport(true);
@@ -758,13 +795,33 @@ export default function Home() {
             themeMode={themeMode}
             onThemeToggle={() => setThemeMode((prev) => (prev === "dark" ? "light" : "dark"))}
             roleName={roleName}
-            onRoleClick={() => setShowRoleModal(true)}
+            onRoleClick={() => {
+              if (allowedRoles.length > 1) setShowRoleModal(true);
+            }}
             isUploading={isUploading}
             uploadStatus={uploadStatus}
           />
         </div>
       </div>
-      {showRoleModal && <RoleSelector onSelect={handleRoleSelect} />}
+      {showRoleModal && !viewerLoading && allowedRoles.length > 0 ? (
+        <RoleSelector onSelect={handleRoleSelect} roles={allowedRoles} />
+      ) : null}
+      {stateReady && !viewerLoading && allowedRoles.length === 0 ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 backdrop-blur-xl" style={{ background: "var(--role-overlay)" }} />
+          <div className="panel-surface relative w-full max-w-lg rounded-[28px] px-6 py-7">
+            <div className="text-[10px] uppercase tracking-[0.24em]" style={{ color: "var(--color-amber-soft)" }}>
+              Role Restricted
+            </div>
+            <h2 className="mt-3 text-[1.8rem] font-semibold leading-tight" style={{ color: "var(--color-sidebar-text-bright)" }}>
+              当前账号没有可用岗位
+            </h2>
+            <p className="mt-3 text-sm leading-7" style={{ color: "var(--color-ink-soft)" }}>
+              管理员未向该成员开放起芽知识库的任何岗位。请在主站管理员后台为该成员勾选可用岗位后再进入。
+            </p>
+          </div>
+        </div>
+      ) : null}
       <ReportPreviewModal
         open={isReportModalOpen}
         report={activeReport}

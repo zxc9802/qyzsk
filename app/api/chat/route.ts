@@ -35,6 +35,11 @@ import {
   assertAppUserSession,
 } from "@/lib/server/app-session";
 import {
+  canUseKbChatRole,
+  DEFAULT_KB_CHAT_ROLE_ACCESS,
+  parseKbChatRoleAccess,
+} from "@/lib/kb-chat-role-access";
+import {
   buildConversationMemoryContext,
   buildEmergencyHistoryWindow,
   estimatePromptChars,
@@ -589,10 +594,12 @@ export async function POST(req: NextRequest) {
   try {
     let userId = "";
     let usageUser: KbChatUsageUser | null = null;
+    let roleAccess = DEFAULT_KB_CHAT_ROLE_ACCESS;
     try {
       const authenticated = await assertAppUserSession(req);
       userId = authenticated.userId;
       usageUser = authenticated.user;
+      roleAccess = parseKbChatRoleAccess(authenticated.session?.user?.kbChatRoles);
     } catch (error) {
       return appSessionErrorResponse(error, req);
     }
@@ -611,6 +618,11 @@ export async function POST(req: NextRequest) {
 
     if (!message || typeof message !== "string") {
       return createJsonResponse({ error: "Missing message" }, 400);
+    }
+
+    const requestedRole = typeof role === "string" && role.trim() ? role.trim() : "new";
+    if (!canUseKbChatRole(roleAccess, requestedRole)) {
+      return createJsonResponse({ error: "管理员未向该账号开放此知识库岗位。" }, 403);
     }
 
     if (typeof conversationId === "string" && conversationId.trim()) {
