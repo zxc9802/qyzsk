@@ -1,19 +1,29 @@
 import { getChatModelOption } from "@/lib/chat-models";
 import { buildClaudeMessagesPayload, readClaudeMessagesText } from "@/lib/server/claude-messages";
+import { generateResponsesText } from "@/lib/server/openai-responses";
 
 const PROVIDER_CONFIG = {
   newapi: {
     apiKey: process.env.NEWAPI_KEY?.trim() || "",
+    baseUrl: process.env.NEWAPI_BASE_URL?.trim() || "",
     apiUrl: buildApiUrl(process.env.NEWAPI_BASE_URL || ""),
     displayName: "Gemini 网关",
   },
   yunwu: {
     apiKey: process.env.YUNWU_API_KEY?.trim() || "",
+    baseUrl: process.env.YUNWU_BASE_URL?.trim() || "https://yunwu.ai/v1",
     apiUrl: buildApiUrl(process.env.YUNWU_BASE_URL || "https://yunwu.ai/v1"),
     displayName: "Yunwu 网关",
   },
+  openlux: {
+    apiKey: process.env.OPENLUX_API_KEY?.trim() || "",
+    baseUrl: process.env.OPENLUX_API_BASE_URL?.trim() || "https://api.openlux.ai",
+    apiUrl: buildResponsesApiUrl(process.env.OPENLUX_API_BASE_URL || "https://api.openlux.ai"),
+    displayName: "OpenLux 网关",
+  },
   yunwu_claude_messages: {
     apiKey: process.env.YUNWU_CLAUDE_CHAT_API_KEY?.trim() || "",
+    baseUrl: process.env.YUNWU_CLAUDE_MESSAGES_URL?.trim() || "",
     apiUrl: process.env.YUNWU_CLAUDE_MESSAGES_URL?.trim() || "",
     displayName: "Claude 网关",
   },
@@ -26,6 +36,12 @@ function buildApiUrl(baseUrl: string): string {
   return trimmed.endsWith("/v1")
     ? `${trimmed}/chat/completions`
     : `${trimmed}/v1/chat/completions`;
+}
+
+function buildResponsesApiUrl(baseUrl: string): string {
+  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  return trimmed.endsWith("/v1") ? `${trimmed}/responses` : `${trimmed}/v1/responses`;
 }
 
 function resolveProviderConfig(modelId: string) {
@@ -121,6 +137,18 @@ export async function generateModelText(options: {
     }
 
     return content.trim();
+  }
+
+  if (modelOption.provider === "openlux") {
+    const result = await generateResponsesText({
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      model: modelOption.apiModel,
+      instructions: options.systemPrompt,
+      input: options.userPrompt,
+      maxOutputTokens: options.maxTokens ?? 2600,
+    });
+    return result.text;
   }
 
   const response = await fetch(provider.apiUrl, {

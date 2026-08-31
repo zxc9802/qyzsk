@@ -1,9 +1,10 @@
-export type ChatProviderId = "newapi" | "yunwu" | "yunwu_claude_messages";
+export type ChatProviderId = "newapi" | "yunwu" | "openlux" | "yunwu_claude_messages";
 
 export type ChatModelId =
   | "gemini-3.1-pro-preview"
   | "yunwu-gemini-3-flash-preview"
-  | "yunwu-gpt-5.4";
+  | "yunwu-gpt-5.4"
+  | "yunwu-gpt-5.6";
 
 export interface ChatModelOption {
   id: ChatModelId;
@@ -60,9 +61,17 @@ export const CHAT_MODELS: ChatModelOption[] = [
     id: "yunwu-gpt-5.4",
     label: "GPT-5.5",
     shortLabel: "GPT-5.5",
-    provider: "yunwu",
+    provider: "openlux",
+    apiModel: "gpt-5.5",
+    description: "走 OpenLux 的 GPT-5.5",
+  },
+  {
+    id: "yunwu-gpt-5.6",
+    label: "GPT-5.6",
+    shortLabel: "GPT-5.6",
+    provider: "openlux",
     apiModel: "gpt-5.6-luna",
-    description: "走 Yunwu 的 GPT-5.5",
+    description: "走 OpenLux 的 GPT-5.6 Luna",
   },
 ];
 

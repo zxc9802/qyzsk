@@ -18,6 +18,7 @@ import {
 } from "@/lib/server/gemini-native";
 import { buildConversationMediaContext, type OpenAIContentPart } from "@/lib/server/media-parts";
 import { generateResponsesWebSearch } from "@/lib/server/openai-web-search";
+import { generateResponsesText } from "@/lib/server/openai-responses";
 import { buildRetrievalOrchestratorResult } from "@/lib/server/retrieval-orchestrator";
 import { buildWebSearchInstruction, buildWebSearchPolicyDecision } from "@/lib/server/web-search-policy";
 import {
@@ -83,6 +84,12 @@ const PROVIDER_CONFIG = {
     apiUrl: buildApiUrl(process.env.YUNWU_BASE_URL || "https://yunwu.ai/v1"),
     displayName: "Yunwu 网关",
   },
+  openlux: {
+    apiKey: process.env.OPENLUX_API_KEY?.trim() || "",
+    baseUrl: buildProviderBaseUrl(process.env.OPENLUX_API_BASE_URL || "https://api.openlux.ai"),
+    apiUrl: buildResponsesApiUrl(process.env.OPENLUX_API_BASE_URL || "https://api.openlux.ai"),
+    displayName: "OpenLux 网关",
+  },
   yunwu_claude_messages: {
     apiKey: process.env.YUNWU_CLAUDE_CHAT_API_KEY?.trim() || "",
     baseUrl: buildProviderBaseUrl(process.env.YUNWU_CLAUDE_MESSAGES_URL || ""),
@@ -143,6 +150,12 @@ function buildApiUrl(baseUrl: string): string {
   return trimmed.endsWith("/v1")
     ? `${trimmed}/chat/completions`
     : `${trimmed}/v1/chat/completions`;
+}
+
+function buildResponsesApiUrl(baseUrl: string): string {
+  const trimmed = buildProviderBaseUrl(baseUrl);
+  if (!trimmed) return "";
+  return trimmed.endsWith("/v1") ? `${trimmed}/responses` : `${trimmed}/v1/responses`;
 }
 
 function buildProviderBaseUrl(baseUrl: string): string {
@@ -325,6 +338,34 @@ function buildProviderRequestBody(
     max_tokens: options.maxTokens,
     temperature: options.temperature,
   };
+}
+
+function buildResponsesRequest(messages: ProviderMessage[]) {
+  const instructions = messages
+    .filter((message) => message.role === "system")
+    .map((message) => typeof message.content === "string"
+      ? message.content
+      : message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n"))
+    .filter(Boolean)
+    .join("\n\n");
+  const input = messages
+    .filter((message) => message.role !== "system")
+    .map((message) => ({
+      role: message.role,
+      content: typeof message.content === "string"
+        ? message.content
+        : message.content.map((part) => part.type === "text"
+          ? {
+              type: message.role === "assistant" ? "output_text" : "input_text",
+              text: part.text,
+            }
+          : {
+              type: "input_image",
+              image_url: part.image_url.url,
+            }),
+    }));
+
+  return { instructions, input };
 }
 
 function buildGeminiClient(
@@ -924,7 +965,7 @@ export async function POST(req: NextRequest) {
           return createSseEventResponse(
             [
               ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
-              { content: "已打开联网搜索，但 `YUNWU_BASE_URL` 或 `YUNWU_API_KEY` 还没有配置完整，请先检查 .env。" },
+              { content: "已打开联网搜索，但 `OPENLUX_API_BASE_URL` 或 `OPENLUX_API_KEY` 还没有配置完整，请先检查 .env。" },
             ]
           );
           }
@@ -1026,6 +1067,49 @@ export async function POST(req: NextRequest) {
     ];
 
     let messages = buildProviderMessages(recentHistory, conversationMemoryContext);
+
+    if (isGptModel(modelOption)) {
+      try {
+        const responsesRequest = buildResponsesRequest(messages);
+        const result = await generateResponsesText({
+          baseUrl: provider.baseUrl,
+          apiKey: provider.apiKey,
+          model: apiModel,
+          instructions: responsesRequest.instructions,
+          input: responsesRequest.input,
+          maxOutputTokens: 4096,
+        });
+        const usage = mergeStreamUsage(null, extractStreamUsageFragment(result.payload));
+        if (usage && usageUser) {
+          await reportKbChatTextUsage({
+            user: usageUser,
+            model: apiModel,
+            providerId: modelOption.provider,
+            usage,
+            groupMultiplier: Number(process.env.OPENLUX_GROUP_MULTIPLIER) || 1,
+          });
+        }
+
+        return createSseEventResponse(
+          [
+            ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+            ...(effectiveKbHits.length > 0 ? [{ kbHits: effectiveKbHits }] : []),
+            ...(effectiveSourceHits.length > 0 ? [{ sourceHits: effectiveSourceHits }] : []),
+            ...(effectiveMediaItems.length > 0 ? [{ mediaItems: effectiveMediaItems }] : []),
+            { content: result.text },
+          ]
+        );
+      } catch (error) {
+        console.error("OpenLux GPT response error:", error);
+        return createSseEventResponse(
+          [
+            ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+            { content: error instanceof Error ? `GPT 模型调用失败：${error.message}` : "GPT 模型调用失败，请稍后重试。" },
+          ]
+        );
+      }
+    }
+
     let response = await fetch(provider.apiUrl, {
       method: "POST",
       headers: {

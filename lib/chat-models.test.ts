@@ -13,13 +13,20 @@ test("primary chat model is displayed and routed as Claude Opus 4.6", () => {
   assert.equal(primary.apiKeyEnvName, "YUNWU_CLAUDE_CHAT_API_KEY");
 });
 
-test("GPT selection routes to GPT-5.6 Luna while retaining its display label", () => {
-  const gpt = getChatModelOption("yunwu-gpt-5.4");
+test("GPT-5.5 and GPT-5.6 share one provider while routing to distinct upstream models", () => {
+  const gpt55 = getChatModelOption("yunwu-gpt-5.4");
+  const gpt56 = getChatModelOption("yunwu-gpt-5.6");
 
-  assert.equal(gpt.label, "GPT-5.5");
-  assert.equal(gpt.shortLabel, "GPT-5.5");
-  assert.equal(gpt.description, "走 Yunwu 的 GPT-5.5");
-  assert.equal(gpt.apiModel, "gpt-5.6-luna");
+  assert.equal(gpt55.label, "GPT-5.5");
+  assert.equal(gpt55.shortLabel, "GPT-5.5");
+  assert.equal(gpt55.description, "走 OpenLux 的 GPT-5.5");
+  assert.equal(gpt55.apiModel, "gpt-5.5");
+  assert.equal(gpt56.label, "GPT-5.6");
+  assert.equal(gpt56.shortLabel, "GPT-5.6");
+  assert.equal(gpt56.description, "走 OpenLux 的 GPT-5.6 Luna");
+  assert.equal(gpt56.apiModel, "gpt-5.6-luna");
+  assert.equal(gpt55.provider, "openlux");
+  assert.equal(gpt56.provider, gpt55.provider);
 });
 
 test("other chat model labels stay unchanged", () => {
