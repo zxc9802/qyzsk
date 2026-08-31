@@ -83,6 +83,20 @@ export default function Home() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [activeReport, setActiveReport] = useState<ConversationReport | null>(null);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileSidebarOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mobileSidebarOpen]);
 
   const persistState = useCallback(async (payload: ChatStatePayload) => {
     try {
@@ -759,9 +773,9 @@ export default function Home() {
         <div className="absolute bottom-[-18%] left-[28%] h-[30rem] w-[30rem] rounded-full blur-3xl" style={{ background: "var(--shell-orb-c)" }} />
       </div>
 
-      <div className="relative h-full p-3 md:p-4">
+      <div className="relative h-full app-safe-area">
         <div
-          className="panel-surface flex h-full overflow-hidden rounded-[34px]"
+          className="panel-surface relative flex h-full overflow-hidden rounded-[24px] sm:rounded-[34px]"
           style={{
             background: "var(--shell-surface)",
             backdropFilter: "blur(22px)",
@@ -770,9 +784,17 @@ export default function Home() {
           <Sidebar
             conversations={conversations}
             activeId={activeId}
-            onSelect={handleSelectConversation}
-            onNew={handleNewConversation}
+            onSelect={(id) => {
+              handleSelectConversation(id);
+              setMobileSidebarOpen(false);
+            }}
+            onNew={() => {
+              handleNewConversation();
+              setMobileSidebarOpen(false);
+            }}
             onDelete={handleDeleteConversation}
+            mobileOpen={mobileSidebarOpen}
+            onMobileClose={() => setMobileSidebarOpen(false)}
           />
           <ChatArea
             conversationId={activeId}
@@ -801,7 +823,17 @@ export default function Home() {
             }}
             isUploading={isUploading}
             uploadStatus={uploadStatus}
+            onToggleSidebar={() => setMobileSidebarOpen(true)}
+            mobileSidebarOpen={mobileSidebarOpen}
           />
+          {mobileSidebarOpen && (
+            <button
+              type="button"
+              aria-label="关闭侧边栏"
+              onClick={() => setMobileSidebarOpen(false)}
+              className="absolute inset-0 z-30 bg-black/55 backdrop-blur-sm md:hidden"
+            />
+          )}
         </div>
       </div>
       {showRoleModal && !viewerLoading && allowedRoles.length > 0 ? (

@@ -93,16 +93,16 @@ export default function InputBar({
   const footerText = uploadStatus || null;
 
   return (
-    <div className="shrink-0 px-4 pb-2 pt-0 md:px-6 md:pb-3">
+    <div className="shrink-0 px-3 pb-2 pt-0 sm:px-4 md:px-6 md:pb-3">
       <div className="mx-auto max-w-6xl">
         <ConversationFiles files={files} onToggle={onToggleFile} onDelete={onDeleteFile} />
 
-        <div className="mt-2 flex items-center justify-start gap-3">
-          <div className="relative">
+        <div className="mt-2 flex flex-wrap items-center justify-start gap-2 sm:gap-3">
+          <div className="relative min-w-0 flex-1 basis-[7.5rem] sm:flex-none">
             <select
               value={selectedModelId}
               onChange={(e) => onModelChange(e.target.value as ChatModelId)}
-              className="command-select pr-9 text-[13px] cursor-pointer"
+              className="command-select w-full pr-8 text-[13px] cursor-pointer sm:w-auto sm:pr-9"
               title="选择回答模型"
             >
               {CHAT_MODELS.map((model) => (
@@ -124,11 +124,11 @@ export default function InputBar({
               <path d="M2.5 3.5L5 6.5L7.5 3.5" />
             </svg>
           </div>
-          <div className="relative">
+          <div className="relative min-w-0 flex-1 basis-[6.5rem] sm:flex-none">
             <select
               value={selectedAnswerMode}
               onChange={(e) => onAnswerModeChange(e.target.value as AnswerMode)}
-              className="command-select pr-9 text-[13px] cursor-pointer"
+              className="command-select w-full pr-8 text-[13px] cursor-pointer sm:w-auto sm:pr-9"
               title="选择回答深度"
             >
               {ANSWER_MODES.map((mode) => (
@@ -154,7 +154,7 @@ export default function InputBar({
             type="button"
             onClick={() => onWebSearchToggle(!webSearchEnabled)}
             disabled={disabled}
-            className="command-select px-4 text-[13px] cursor-pointer transition-colors"
+            className="command-select w-full px-4 text-[13px] cursor-pointer transition-colors sm:w-auto"
             style={{
               background: webSearchEnabled ? "rgba(214, 161, 99, 0.16)" : undefined,
               borderColor: webSearchEnabled ? "var(--surface-outline-accent)" : undefined,
@@ -168,7 +168,7 @@ export default function InputBar({
         </div>
 
         <div
-          className="mt-1 flex items-end gap-3 rounded-[30px] border px-4 py-4 transition-all duration-200 md:px-5"
+          className="mt-1 flex items-end gap-2 rounded-[24px] border px-3 py-3 transition-all duration-200 sm:gap-3 sm:rounded-[30px] sm:px-4 sm:py-4 md:px-5"
           onDragEnter={(event) => {
             event.preventDefault();
             if (!disabled && !isUploading) setDragActive(true);
@@ -205,7 +205,7 @@ export default function InputBar({
             type="button"
             onClick={handlePickFiles}
             disabled={disabled || isUploading}
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] border transition-all duration-200 cursor-pointer disabled:cursor-default"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] border transition-all duration-200 cursor-pointer disabled:cursor-default sm:h-12 sm:w-12 sm:rounded-[18px]"
             style={{
               background: isUploading
                 ? "rgba(214, 161, 99, 0.14)"
@@ -233,10 +233,10 @@ export default function InputBar({
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={dragActive ? "松开即可上传文档、图片或视频" : "把你的问题、目标或资料分析任务写在这里。"}
+              placeholder={dragActive ? "松开即可上传" : "输入你的问题..."}
               disabled={disabled}
               rows={1}
-              className="w-full resize-none border-none bg-transparent px-2 py-2 text-[15px] leading-8 outline-none"
+              className="w-full resize-none border-none bg-transparent px-1 py-1.5 text-[16px] leading-7 outline-none sm:px-2 sm:py-2 sm:text-[15px] sm:leading-8"
               style={{
                 color: "var(--color-sidebar-text-bright)",
                 maxHeight: "180px",
@@ -247,7 +247,7 @@ export default function InputBar({
           <button
             onClick={handleSubmit}
             disabled={disabled || !text.trim()}
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] transition-all duration-200 cursor-pointer disabled:cursor-default"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] transition-all duration-200 cursor-pointer disabled:cursor-default sm:h-12 sm:w-12 sm:rounded-[18px]"
             style={{
               background: text.trim() && !disabled
                 ? "var(--brand-badge)"

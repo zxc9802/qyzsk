@@ -699,3 +699,61 @@ body::after {
 .report-transcript-paragraph {
   margin: 0;
 }
+
+/* ---- PWA / 移动端适配 ---- */
+
+/* iOS Safari 在键盘弹起或地址栏收起时 100vh 不可靠。dvh 取动态可视高度。 */
+html,
+body {
+  height: 100%;
+  min-height: 100dvh;
+}
+
+/* 阻止整页橡皮筋回弹，仅允许内部滚动区域滚动。 */
+html,
+body {
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 主内容壳的安全区适配：小屏尽量留出内容宽度，桌面保持原有间距。 */
+.app-safe-area {
+  padding: 0.5rem;
+  padding-top: calc(0.5rem + env(safe-area-inset-top, 0));
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0));
+  padding-left: calc(0.5rem + env(safe-area-inset-left, 0));
+  padding-right: calc(0.5rem + env(safe-area-inset-right, 0));
+}
+
+@media (min-width: 768px) {
+  .app-safe-area {
+    padding: 1rem;
+    padding-top: calc(1rem + env(safe-area-inset-top, 0));
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0));
+    padding-left: calc(1rem + env(safe-area-inset-left, 0));
+    padding-right: calc(1rem + env(safe-area-inset-right, 0));
+  }
+}
+
+/* iOS 上 input 触发的聚焦自动放大。 */
+input,
+textarea,
+select,
+button {
+  font-size: 16px;
+}
+
+@media (min-width: 768px) {
+  input,
+  textarea,
+  select,
+  button {
+    font-size: inherit;
+  }
+}
+
+/* 主滚动容器：让溢出滚动使用 100dvh，避免地址栏收起时跳动。 */
+.scrollable-shell {
+  height: 100%;
+  max-height: 100dvh;
+}

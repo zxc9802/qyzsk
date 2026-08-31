@@ -18,10 +18,10 @@ const CAPABILITY_NOTES = [
 export default function EmptyState({ onQuestionClick, roleId, roleName }: EmptyStateProps) {
   const questions = filterExampleQuestionsByRole(EXAMPLE_QUESTIONS, roleId);
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-8 md:px-10 md:py-10">
+    <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-8 md:px-10 md:py-10">
       <div className="mx-auto max-w-6xl">
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1.18fr)_minmax(300px,0.72fr)]">
-          <section className="panel-surface rounded-[34px] px-7 py-8 md:px-10 md:py-10 animate-fade-up">
+          <section className="panel-surface rounded-[24px] px-5 py-6 sm:rounded-[34px] sm:px-7 sm:py-8 md:px-10 md:py-10 animate-fade-up">
             <div className="editorial-kicker mb-5">Editorial Command Deck</div>
             <div className="flex flex-col gap-7 lg:flex-row lg:items-end lg:justify-between">
               <div className="max-w-3xl">
@@ -35,7 +35,7 @@ export default function EmptyState({ onQuestionClick, roleId, roleName }: EmptyS
                 >
                   <span className="text-3xl">✦</span>
                 </div>
-                <h1 className="display-face text-[2.55rem] font-semibold leading-[1.08] md:text-[3.35rem]" style={{ color: "var(--color-sidebar-text-bright)" }}>
+                <h1 className="display-face text-[2rem] font-semibold leading-[1.12] sm:text-[2.55rem] md:text-[3.35rem]" style={{ color: "var(--color-sidebar-text-bright)" }}>
                   把模糊问题，
                   <br />
                   改写成可执行判断。
@@ -71,7 +71,7 @@ export default function EmptyState({ onQuestionClick, roleId, roleName }: EmptyS
             </div>
           </section>
 
-          <aside className="soft-panel rounded-[30px] px-6 py-7 animate-fade-up" style={{ animationDelay: "0.06s", opacity: 0 }}>
+          <aside className="soft-panel rounded-[24px] px-5 py-6 sm:rounded-[30px] sm:px-6 sm:py-7 animate-fade-up" style={{ animationDelay: "0.06s", opacity: 0 }}>
             <div className="editorial-kicker mb-5">Desk Notes</div>
             <h2 className="display-face text-2xl font-semibold" style={{ color: "var(--color-sidebar-text-bright)" }}>
               这张工作台适合什么问题

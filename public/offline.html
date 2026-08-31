@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#07101b" />
+<title>当前处于离线状态 · 内部业务助手</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #050913; color: #edf3ff; font-family: "PingFang SC", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  body {
+    min-height: 100dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    padding-top: calc(24px + env(safe-area-inset-top, 0));
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0));
+    box-sizing: border-box;
+    background:
+      radial-gradient(circle at 18% 12%, rgba(214,161,99,0.16), transparent 30%),
+      radial-gradient(circle at 82% 88%, rgba(59,94,142,0.18), transparent 34%),
+      linear-gradient(180deg, #03070d 0%, #07101b 100%);
+  }
+  .card {
+    max-width: 420px;
+    width: 100%;
+    background: rgba(8, 18, 31, 0.78);
+    border: 1px solid rgba(141, 164, 201, 0.14);
+    border-radius: 24px;
+    padding: 28px 24px;
+    text-align: center;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+  .badge {
+    width: 56px; height: 56px;
+    margin: 0 auto 16px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 16px;
+    background: linear-gradient(145deg, rgba(214,161,99,0.95), rgba(162,105,43,0.88));
+    color: #10151f;
+    font-weight: 700;
+    font-size: 22px;
+    box-shadow: 0 12px 28px rgba(214,161,99,0.16);
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 8px; color: #f4f8ff; }
+  p { font-size: 14px; line-height: 1.6; margin: 0 0 18px; color: #bac6da; }
+  button {
+    appearance: none; border: 0; cursor: pointer;
+    min-height: 44px;
+    padding: 10px 18px; border-radius: 999px;
+    background: linear-gradient(145deg, #d6a163, #a26b2b);
+    color: #10151f; font-weight: 600; font-size: 14px;
+  }
+  button:active { transform: translateY(1px); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">K</div>
+    <h1>当前网络好像走丢了</h1>
+    <p>内部业务助手需要联网后才能回答问题。请检查 Wi-Fi 或移动网络，恢复后点击下方按钮重新进入。</p>
+    <button onclick="location.reload()">重新尝试</button>
+  </div>
+</body>
+</html>

@@ -273,7 +273,7 @@ export default function MessageBubble({
     return (
       <div className="mb-5 flex justify-end animate-fade-up">
         <div
-          className="max-w-[74%] rounded-[26px] rounded-br-[12px] border px-5 py-4 text-[15px] leading-8"
+          className="max-w-[90%] rounded-[22px] rounded-br-[10px] border px-4 py-3 text-[15px] leading-7 sm:max-w-[74%] sm:rounded-[26px] sm:rounded-br-[12px] sm:px-5 sm:py-4 sm:leading-8"
           style={{
             background: "var(--surface-user-bubble)",
             color: "var(--color-sidebar-text-bright)",
@@ -289,10 +289,10 @@ export default function MessageBubble({
 
   return (
     <div className="mb-8 flex justify-start animate-fade-up">
-      <div className="flex max-w-[88%] gap-4">
+      <div className="flex max-w-full gap-2 sm:max-w-[88%] sm:gap-4">
         <div className="mt-1 shrink-0">
           <div
-            className="flex h-10 w-10 items-center justify-center rounded-[16px] text-sm font-semibold"
+            className="flex h-8 w-8 items-center justify-center rounded-[12px] text-xs font-semibold sm:h-10 sm:w-10 sm:rounded-[16px] sm:text-sm"
             style={{
               background: "var(--brand-badge)",
               color: "var(--brand-badge-text)",
@@ -310,7 +310,7 @@ export default function MessageBubble({
             </div>
           ) : null}
           <div
-            className="rounded-[30px] rounded-tl-[14px] border px-7 py-6"
+            className="rounded-[24px] rounded-tl-[12px] border px-4 py-4 sm:rounded-[30px] sm:rounded-tl-[14px] sm:px-7 sm:py-6"
             style={{
               background: "var(--surface-card)",
               borderColor: "var(--surface-outline)",
