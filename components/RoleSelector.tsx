@@ -15,13 +15,13 @@ const GUIDING_POINTS = [
 
 export default function RoleSelector({ onSelect, roles = ROLES }: RoleSelectorProps) {
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto px-3 py-3 animate-backdrop md:px-4 md:py-4">
+    <div className="fixed inset-0 z-50 overflow-hidden px-3 py-3 animate-backdrop md:px-4 md:py-4">
       <div className="absolute inset-0 backdrop-blur-xl" style={{ background: "var(--role-overlay)" }} />
       <div className="relative flex min-h-full items-start justify-center lg:items-center">
-        <div className="animate-modal panel-surface relative my-auto w-full max-w-5xl overflow-hidden rounded-[34px] max-h-[calc(100dvh-1.5rem)]">
+        <div className="animate-modal panel-surface relative my-auto w-full max-w-5xl touch-pan-y overflow-y-auto overscroll-contain rounded-[34px] max-h-[calc(100dvh-1.5rem)] [-webkit-overflow-scrolling:touch] lg:overflow-hidden">
           <div className="grid min-h-0 lg:grid-cols-[0.88fr_1.12fr]">
             <div
-              className="relative min-h-0 overflow-y-auto border-b px-6 py-6 md:px-8 md:py-7 lg:border-b-0 lg:border-r"
+              className="relative min-h-0 overflow-visible border-b px-6 py-6 md:px-8 md:py-7 lg:overflow-y-auto lg:border-b-0 lg:border-r"
               style={{ borderColor: "var(--surface-outline)" }}
             >
               <div
@@ -79,7 +79,7 @@ export default function RoleSelector({ onSelect, roles = ROLES }: RoleSelectorPr
               </div>
             </div>
 
-            <div className="min-h-0 overflow-y-auto px-5 py-5 md:px-7 md:py-6">
+            <div className="min-h-0 overflow-visible px-5 py-5 md:px-7 md:py-6 lg:overflow-y-auto">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
                   <div className="text-[10px] uppercase tracking-[0.24em]" style={{ color: "var(--color-amber-soft)" }}>
