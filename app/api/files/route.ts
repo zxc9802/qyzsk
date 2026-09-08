@@ -1,3 +1,4 @@
+import { runWithUsageUser } from "@/lib/server/main-usage";
 import { after, NextRequest } from "next/server";
 import {
   createPendingFileRecord,
@@ -68,7 +69,7 @@ export async function GET(req: NextRequest) {
   return json({ files: files.map(toClientConversationFile) });
 }
 
-export async function POST(req: NextRequest) {
+async function handleUsagePost(req: NextRequest) {
   let userId = "";
   try {
     ({ userId } = await assertAppUserSession(req));
@@ -182,4 +183,13 @@ export async function DELETE(req: NextRequest) {
     deleteConversationContextState(userId, conversationId),
   ]);
   return json({ ok: true });
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { userId } = await assertAppUserSession(req);
+    return await runWithUsageUser(userId, () => handleUsagePost(req));
+  } catch (error) {
+    return appSessionErrorResponse(error, req);
+  }
 }

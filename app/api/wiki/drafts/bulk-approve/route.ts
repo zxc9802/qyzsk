@@ -1,3 +1,5 @@
+import { runWithUsageUser } from "@/lib/server/main-usage";
+import { assertAppUserSession as usageAuthenticate, appSessionErrorResponse as usageAuthError } from "@/lib/server/app-session";
 import { NextRequest } from "next/server";
 import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
 import { applyWikiDraftAction } from "@/lib/server/wiki-review";
@@ -17,7 +19,7 @@ type BulkApproveItem = {
   notes?: string;
 };
 
-export async function POST(req: NextRequest) {
+async function usageHandlePOST(req: NextRequest) {
   try {
     await assertWikiAdminAccess(req);
   } catch (error) {
@@ -71,4 +73,11 @@ export async function POST(req: NextRequest) {
       headers: { "Content-Type": "application/json" },
     });
   }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { userId } = await usageAuthenticate(req);
+    return await runWithUsageUser(userId, () => usageHandlePOST(req));
+  } catch (error) { return usageAuthError(error, req); }
 }

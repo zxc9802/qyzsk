@@ -1,3 +1,4 @@
+import { runWithUsageUser } from "@/lib/server/main-usage";
 import { approveIngestedWikiSource, createDraftsFromSource } from "@/lib/server/wiki-drafts";
 import { processWikiUploadInputs } from "@/lib/server/wiki-media";
 import { createWikiSourceRecord, readWikiSourceRecord, updateWikiSourceRecord } from "@/lib/server/wiki-store";
@@ -25,7 +26,7 @@ export async function createProcessingWikiSource(options: {
   });
 }
 
-export async function runWikiIngestJob(options: {
+async function handleWikiIngestJob(options: {
   sourceId: string;
   title: string;
   content: string;
@@ -95,4 +96,10 @@ export function describeQueuedIngest(source: WikiSourceRecord, autoApprove: bool
     return `「${source.title}」已开始处理，完成后会直接写入正式 Wiki。`;
   }
   return `「${source.title}」已开始处理，完成后会进入待审核草稿。`;
+}
+
+export async function runWikiIngestJob(options: Parameters<typeof handleWikiIngestJob>[0]) {
+  return options.submittedBy?.userId
+    ? runWithUsageUser(options.submittedBy.userId, () => handleWikiIngestJob(options))
+    : handleWikiIngestJob(options);
 }

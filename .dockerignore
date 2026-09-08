@@ -12,3 +12,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .DS_Store
+
+# Server-side usage report outbox (contains employee IDs).
+.usage-outbox/
+**/.usage-outbox/

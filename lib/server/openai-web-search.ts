@@ -1,3 +1,4 @@
+import { meteredFetch } from "@/lib/server/main-usage";
 import type { RetrievalSourceHit } from "@/lib/types";
 
 export interface ResponsesWebSearchClientConfig {
@@ -113,7 +114,7 @@ export async function generateResponsesWebSearch({
   instructions,
   input,
 }: GenerateResponsesWebSearchOptions): Promise<ResponsesWebSearchResult> {
-  const response = await fetch(`${normalizeBaseUrl(client.baseUrl)}/responses`, {
+  const response = await meteredFetch(`${normalizeBaseUrl(client.baseUrl)}/responses`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${client.apiKey}`,

@@ -1,3 +1,4 @@
+import { meteredFetch } from "@/lib/server/main-usage";
 import { getChatModelOption } from "@/lib/chat-models";
 import { buildClaudeMessagesPayload, readClaudeMessagesText } from "@/lib/server/claude-messages";
 import { generateResponsesText } from "@/lib/server/openai-responses";
@@ -79,7 +80,7 @@ export async function generateModelText(options: {
   }
 
   if (modelOption.provider === "yunwu_claude_messages") {
-    const response = await fetch(provider.apiUrl, {
+    const response = await meteredFetch(provider.apiUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${provider.apiKey}`,
@@ -151,7 +152,7 @@ export async function generateModelText(options: {
     return result.text;
   }
 
-  const response = await fetch(provider.apiUrl, {
+  const response = await meteredFetch(provider.apiUrl, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${provider.apiKey}`,

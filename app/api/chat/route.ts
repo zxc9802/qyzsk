@@ -1,3 +1,5 @@
+import { runWithUsageUser } from "@/lib/server/main-usage";
+import { meteredFetch } from "@/lib/server/main-usage";
 import { NextRequest } from "next/server";
 import { DEFAULT_ANSWER_MODE, isAnswerMode } from "@/lib/answer-modes";
 import { DEFAULT_CHAT_MODEL_ID, getChatModelOption, isChatModelId } from "@/lib/chat-models";
@@ -217,7 +219,7 @@ async function runModelDiagnosis(
   apiModel: string,
   prompt: string | OpenAIContentPart[]
 ): Promise<string | null> {
-  const response = await fetch(apiUrl, {
+  const response = await meteredFetch(apiUrl, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -260,7 +262,7 @@ async function runClaudeModelDiagnosis(
   apiModel: string,
   prompt: string | OpenAIContentPart[]
 ): Promise<string | null> {
-  const response = await fetch(apiUrl, {
+  const response = await meteredFetch(apiUrl, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -631,7 +633,7 @@ async function attemptEmergencyCompression(options: {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function handleUsagePost(req: NextRequest) {
   try {
     let userId = "";
     let usageUser: KbChatUsageUser | null = null;
@@ -1110,7 +1112,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    let response = await fetch(provider.apiUrl, {
+    let response = await meteredFetch(provider.apiUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${provider.apiKey}`,
@@ -1142,7 +1144,7 @@ export async function POST(req: NextRequest) {
         recentHistory = emergencyState.recentHistory;
         conversationMemoryContext = buildConversationMemoryContext(emergencyState.contextState?.memoryText || "");
         messages = buildProviderMessages(recentHistory, conversationMemoryContext);
-        response = await fetch(provider.apiUrl, {
+        response = await meteredFetch(provider.apiUrl, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${provider.apiKey}`,
@@ -1310,5 +1312,14 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("Chat API error:", error);
     return createJsonResponse({ error: "Internal server error" }, 500);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { userId } = await assertAppUserSession(req);
+    return await runWithUsageUser(userId, () => handleUsagePost(req));
+  } catch (error) {
+    return appSessionErrorResponse(error, req);
   }
 }

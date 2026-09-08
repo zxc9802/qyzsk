@@ -1,3 +1,5 @@
+import { runWithUsageUser } from "@/lib/server/main-usage";
+import { assertAppUserSession as usageAuthenticate, appSessionErrorResponse as usageAuthError } from "@/lib/server/app-session";
 import { NextRequest } from "next/server";
 import { deriveRelatedPageIds, normalizeWikiRelations } from "@/lib/wiki-relations";
 import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
@@ -19,7 +21,7 @@ function normalizeStringList(value: unknown) {
 
 export const runtime = "nodejs";
 
-export async function PATCH(
+async function usageHandlePATCH(
   req: NextRequest,
   context: { params: Promise<{ pageId: string[] }> }
 ) {
@@ -71,7 +73,7 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
+async function usageHandleDELETE(
   req: NextRequest,
   context: { params: Promise<{ pageId: string[] }> }
 ) {
@@ -102,4 +104,18 @@ export async function DELETE(
       headers: { "Content-Type": "application/json" },
     });
   }
+}
+
+export async function PATCH(req: NextRequest, context: { params: Promise<{ pageId: string[] }> }) {
+  try {
+    const { userId } = await usageAuthenticate(req);
+    return await runWithUsageUser(userId, () => usageHandlePATCH(req, context));
+  } catch (error) { return usageAuthError(error, req); }
+}
+
+export async function DELETE(req: NextRequest, context: { params: Promise<{ pageId: string[] }> }) {
+  try {
+    const { userId } = await usageAuthenticate(req);
+    return await runWithUsageUser(userId, () => usageHandleDELETE(req, context));
+  } catch (error) { return usageAuthError(error, req); }
 }

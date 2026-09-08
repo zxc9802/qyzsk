@@ -1,3 +1,4 @@
+import { meteredFetch } from "@/lib/server/main-usage";
 export type GeminiPart =
   | { text: string }
   | { inline_data: { mime_type: string; data: string } };
@@ -94,7 +95,7 @@ export async function generateGeminiResultWithClient({
     throw new Error("Gemini gateway is not configured.");
   }
 
-  const response = await fetch(buildGeminiUrl(client, model), {
+  const response = await meteredFetch(buildGeminiUrl(client, model), {
     method: "POST",
     headers: buildHeaders(client),
     body: JSON.stringify({

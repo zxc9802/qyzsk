@@ -1,3 +1,5 @@
+import { runWithUsageUser } from "@/lib/server/main-usage";
+import { assertAppUserSession as usageAuthenticate, appSessionErrorResponse as usageAuthError } from "@/lib/server/app-session";
 import { NextRequest } from "next/server";
 import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
 import { applyWikiDraftAction, type WikiDraftAction } from "@/lib/server/wiki-review";
@@ -5,7 +7,7 @@ import { deleteWikiDraft } from "@/lib/server/wiki-store";
 
 export const runtime = "nodejs";
 
-export async function PATCH(
+async function usageHandlePATCH(
   req: NextRequest,
   context: { params: Promise<{ draftId: string }> }
 ) {
@@ -70,4 +72,11 @@ export async function DELETE(
       headers: { "Content-Type": "application/json" },
     });
   }
+}
+
+export async function PATCH(req: NextRequest, context: { params: Promise<{ draftId: string }> }) {
+  try {
+    const { userId } = await usageAuthenticate(req);
+    return await runWithUsageUser(userId, () => usageHandlePATCH(req, context));
+  } catch (error) { return usageAuthError(error, req); }
 }

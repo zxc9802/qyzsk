@@ -1,3 +1,4 @@
+import { runWithUsageUser } from "@/lib/server/main-usage";
 import {
   createConversationContextKey,
   evaluateAndPersistConversationContext,
@@ -109,12 +110,12 @@ async function runJob(payload: CompressionJobPayload) {
 
   try {
     await markRunning(payload);
-    await evaluateAndPersistConversationContext({
+    await runWithUsageUser(payload.userId, () => evaluateAndPersistConversationContext({
       userId: payload.userId,
       conversationId: payload.conversationId,
       modelId: payload.modelId,
       forceTier: payload.forceTier,
-    });
+    }));
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "会话压缩失败。";
     console.error("Conversation compression job error:", key, error);
