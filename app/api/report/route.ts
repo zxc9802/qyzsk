@@ -1,3 +1,4 @@
+import { runWithUsageUser } from "@/lib/server/main-usage";
 import { NextRequest } from "next/server";
 import type { ReportGenerationRequest } from "@/lib/report";
 import {
@@ -38,7 +39,7 @@ function isValidReportRequest(body: unknown): body is ReportGenerationRequest {
   );
 }
 
-export async function POST(req: NextRequest) {
+async function handleUsagePost(req: NextRequest) {
   try {
     let userId = "";
     let roleAccess = parseKbChatRoleAccess(undefined);
@@ -66,5 +67,14 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("Report API error:", error);
     return createJsonResponse({ error: "生成报告失败，请稍后重试。" }, 500);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { userId } = await assertAppUserSession(req);
+    return await runWithUsageUser(userId, () => handleUsagePost(req));
+  } catch (error) {
+    return appSessionErrorResponse(error, req);
   }
 }

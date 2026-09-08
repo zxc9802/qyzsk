@@ -1,3 +1,4 @@
+import { meteredFetch } from "@/lib/server/main-usage";
 import { getRagConfig } from "@/lib/server/rag-config";
 
 // Retrieval-time embeddings stay on the existing OpenAI-compatible model.
@@ -34,7 +35,7 @@ async function requestEmbeddings(texts: string[]): Promise<number[][]> {
     throw new Error("未配置 RAG OpenAI API Key，无法生成 embeddings。");
   }
 
-  const response = await fetch(buildEmbeddingsUrl(config.openAiBaseUrl), {
+  const response = await meteredFetch(buildEmbeddingsUrl(config.openAiBaseUrl), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.openAiApiKey}`,

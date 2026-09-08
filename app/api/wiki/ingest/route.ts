@@ -1,3 +1,4 @@
+import { runWithUsageUser } from "@/lib/server/main-usage";
 import { after } from "next/server";
 import { NextRequest } from "next/server";
 import { appSessionErrorResponse, assertAppUserSession } from "@/lib/server/app-session";
@@ -44,7 +45,7 @@ async function readIngestInput(req: NextRequest) {
   };
 }
 
-export async function POST(req: NextRequest) {
+async function handleUsagePost(req: NextRequest) {
   try {
     const { user } = await assertAppUserSession(req);
     const isAdmin = user?.role === "admin";
@@ -90,5 +91,14 @@ export async function POST(req: NextRequest) {
     console.error("Wiki ingest error:", error);
     const message = error instanceof Error && error.message ? error.message : "提交知识失败。";
     return json({ error: message }, 500);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { userId } = await assertAppUserSession(req);
+    return await runWithUsageUser(userId, () => handleUsagePost(req));
+  } catch (error) {
+    return appSessionErrorResponse(error, req);
   }
 }
