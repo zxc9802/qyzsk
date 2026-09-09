@@ -1,3 +1,5 @@
+import { REPORT_MODEL_ID } from "@/lib/chat-models";
+import { allowedModelIds } from "@/lib/model-access";
 import { NextRequest } from "next/server";
 import type { ReportGenerationRequest } from "@/lib/report";
 import {
@@ -41,10 +43,12 @@ function isValidReportRequest(body: unknown): body is ReportGenerationRequest {
 export async function POST(req: NextRequest) {
   try {
     let userId = "";
+    let modelIds: string[] = [];
     let roleAccess = parseKbChatRoleAccess(undefined);
     try {
       const authenticated = await assertAppUserSession(req);
       userId = authenticated.userId;
+      modelIds = allowedModelIds(authenticated.session?.user || authenticated.user);
       roleAccess = parseKbChatRoleAccess(authenticated.session?.user?.kbChatRoles);
     } catch (error) {
       return appSessionErrorResponse(error, req);
@@ -60,6 +64,9 @@ export async function POST(req: NextRequest) {
       return createJsonResponse({ error: "管理员未向该账号开放此知识库岗位。" }, 403);
     }
 
+    if (!modelIds.includes(body.modelId) || !modelIds.includes(REPORT_MODEL_ID)) {
+      return createJsonResponse({ error: "管理员未向该账号开放此模型。" }, 403);
+    }
     await ensureConversationRecord(userId, body.conversationId, body.conversationTitle);
     const report = await buildConversationReport(body, userId);
     return createJsonResponse({ report }, 200);

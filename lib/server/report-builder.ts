@@ -17,7 +17,7 @@ import {
 } from "@/lib/server/report-cache";
 import { generateModelText } from "@/lib/server/model-text";
 
-const REPORT_MODEL_ID = "yunwu-gemini-3-flash-preview";
+import { REPORT_MODEL_ID } from "@/lib/chat-models";
 const REPORT_PROMPT_VERSION = "2026-04-09-report-speed-v1";
 const MAX_PROMPT_CHARS = 10500;
 const MAX_FILE_SUMMARY_CHARS = 260;

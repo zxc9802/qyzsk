@@ -253,7 +253,22 @@ export async function assertAppSession(request: Pick<Request, "url" | "headers">
 
   const session = readAppSession(request);
   if (session) {
-    return session;
+    // Refresh server-side permissions instead of trusting a twelve-hour SSO snapshot.
+    const response = await fetch(`${getConfiguredMainAppUrl()}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(10000),
+    });
+    const payload = await response.json().catch(() => null);
+    const current = payload?.data;
+    if (!response.ok || !current || current.id !== session.user.id) {
+      throw new AppSessionUnauthorizedError(buildMainAppEntryUrl());
+    }
+    if (current.role !== "admin" && current.botAccess?.mode === "selected"
+        && !current.botAccess.botKeys?.includes("kb-chat")) {
+      throw new AppSessionUnauthorizedError(buildMainAppEntryUrl(), "管理员未向该账号开放此智能体。");
+    }
+    return { ...session, user: { ...session.user, ...current, modelAccess: current.modelAccess } };
   }
 
   throw new AppSessionUnauthorizedError(buildMainAppEntryUrl(resolveRequestedMainAppUrl(request)));

@@ -13,6 +13,7 @@ interface InputBarProps {
   onUpload: (files: File[]) => void | Promise<void>;
   onToggleFile: (fileId: string, nextActive: boolean) => void;
   onDeleteFile: (fileId: string) => void;
+  allowedModelIds: ChatModelId[];
   selectedModelId: ChatModelId;
   onModelChange: (modelId: ChatModelId) => void;
   selectedAnswerMode: AnswerMode;
@@ -30,6 +31,7 @@ export default function InputBar({
   onUpload,
   onToggleFile,
   onDeleteFile,
+  allowedModelIds,
   selectedModelId,
   onModelChange,
   selectedAnswerMode,
@@ -54,7 +56,7 @@ export default function InputBar({
 
   const handleSubmit = () => {
     const trimmed = text.trim();
-    if (!trimmed || disabled) return;
+    if (!trimmed || disabled || !allowedModelIds.includes(selectedModelId)) return;
     onSend(trimmed);
     setText("");
     if (textareaRef.current) {
@@ -100,12 +102,14 @@ export default function InputBar({
         <div className="mt-2 flex flex-wrap items-center justify-start gap-2 sm:gap-3">
           <div className="relative min-w-0 flex-1 basis-[7.5rem] sm:flex-none">
             <select
-              value={selectedModelId}
+              value={allowedModelIds.includes(selectedModelId) ? selectedModelId : ""}
+              disabled={allowedModelIds.length === 0}
               onChange={(e) => onModelChange(e.target.value as ChatModelId)}
               className="command-select w-full pr-8 text-[13px] cursor-pointer sm:w-auto sm:pr-9"
               title="选择回答模型"
             >
-              {CHAT_MODELS.map((model) => (
+              {allowedModelIds.length === 0 && <option value="">暂无已授权模型</option>}
+              {CHAT_MODELS.filter(model => allowedModelIds.includes(model.id)).map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.label}
                 </option>

@@ -11,6 +11,7 @@ export type AppViewer = {
   role?: string;
   groupName?: string;
   kbChatRoles: KbChatRoleAccess;
+  modelAccess?: unknown;
 };
 
 type SessionResponsePayload = {
@@ -33,7 +34,7 @@ function normalizeViewer(user: Record<string, unknown> | undefined): AppViewer |
   const id = typeof user.id === "string" ? user.id.trim() : "";
   if (!id) return null;
 
-  const viewer: AppViewer = { id, kbChatRoles: parseKbChatRoleAccess(user.kbChatRoles) };
+  const viewer: AppViewer = { id, modelAccess: user.modelAccess, kbChatRoles: parseKbChatRoleAccess(user.kbChatRoles) };
   const account = typeof user.account === "string"
     ? user.account.trim()
     : typeof user.email === "string"
@@ -80,6 +81,7 @@ export function useAppViewer() {
         setViewer(normalizeViewer(payload?.data?.session?.user));
       } catch (requestError) {
         if (cancelled) return;
+        setViewer(null);
         setError(requestError instanceof Error ? requestError.message : "读取当前登录状态失败");
       } finally {
         if (!cancelled) {
@@ -89,9 +91,11 @@ export function useAppViewer() {
     }
 
     void loadSession();
-
+    const refresh = () => { void loadSession(); };
+    window.addEventListener("focus", refresh);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", refresh);
     };
   }, []);
 

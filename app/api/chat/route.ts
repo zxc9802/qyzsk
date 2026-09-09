@@ -1,3 +1,4 @@
+import { allowedModelIds } from "@/lib/model-access";
 import { NextRequest } from "next/server";
 import { DEFAULT_ANSWER_MODE, isAnswerMode } from "@/lib/answer-modes";
 import { DEFAULT_CHAT_MODEL_ID, getChatModelOption, isChatModelId } from "@/lib/chat-models";
@@ -634,11 +635,13 @@ async function attemptEmergencyCompression(options: {
 export async function POST(req: NextRequest) {
   try {
     let userId = "";
+    let modelIds: string[] = [];
     let usageUser: KbChatUsageUser | null = null;
     let roleAccess = DEFAULT_KB_CHAT_ROLE_ACCESS;
     try {
       const authenticated = await assertAppUserSession(req);
       userId = authenticated.userId;
+      modelIds = allowedModelIds(authenticated.session?.user || authenticated.user);
       usageUser = authenticated.user;
       roleAccess = parseKbChatRoleAccess(authenticated.session?.user?.kbChatRoles);
     } catch (error) {
@@ -666,14 +669,15 @@ export async function POST(req: NextRequest) {
       return createJsonResponse({ error: "管理员未向该账号开放此知识库岗位。" }, 403);
     }
 
+    const resolvedModelId = typeof modelId === "string" && isChatModelId(modelId)
+      ? modelId : DEFAULT_CHAT_MODEL_ID;
+    if (!modelIds.includes(resolvedModelId)) {
+      return createJsonResponse({ error: "管理员未向该账号开放此模型。" }, 403);
+    }
     if (typeof conversationId === "string" && conversationId.trim()) {
       await ensureConversationRecord(userId, conversationId, message);
     }
 
-    const resolvedModelId =
-      typeof modelId === "string" && isChatModelId(modelId)
-        ? modelId
-        : DEFAULT_CHAT_MODEL_ID;
     const resolvedAnswerMode =
       typeof answerMode === "string" && isAnswerMode(answerMode)
         ? answerMode

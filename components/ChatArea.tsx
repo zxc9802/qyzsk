@@ -21,6 +21,7 @@ interface ChatAreaProps {
   onToggleFile: (fileId: string, nextActive: boolean) => void;
   onDeleteFile: (fileId: string) => void;
   onGenerateReport: () => void;
+  allowedModelIds: ChatModelId[];
   selectedModelId: ChatModelId;
   onModelChange: (modelId: ChatModelId) => void;
   selectedAnswerMode: AnswerMode;
@@ -53,6 +54,7 @@ export default function ChatArea({
   onToggleFile,
   onDeleteFile,
   onGenerateReport,
+  allowedModelIds,
   selectedModelId,
   onModelChange,
   selectedAnswerMode,
@@ -231,13 +233,14 @@ export default function ChatArea({
         onUpload={onUpload}
         onToggleFile={onToggleFile}
         onDeleteFile={onDeleteFile}
+        allowedModelIds={allowedModelIds}
         selectedModelId={selectedModelId}
         onModelChange={onModelChange}
         selectedAnswerMode={selectedAnswerMode}
         onAnswerModeChange={onAnswerModeChange}
         webSearchEnabled={webSearchEnabled}
         onWebSearchToggle={onWebSearchToggle}
-        disabled={isStreaming}
+        disabled={isStreaming || !allowedModelIds.includes(selectedModelId)}
         isUploading={isUploading}
         uploadStatus={uploadStatus}
       />

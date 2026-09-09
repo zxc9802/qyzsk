@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { DEFAULT_ANSWER_MODE, isAnswerMode, type AnswerMode } from "@/lib/answer-modes";
 import type { ChatStatePayload } from "@/lib/chat-state";
-import { DEFAULT_CHAT_MODEL_ID, isChatModelId, type ChatModelId } from "@/lib/chat-models";
+import { allowedModelIds } from "@/lib/model-access";
+import { REPORT_MODEL_ID, DEFAULT_CHAT_MODEL_ID, isChatModelId, type ChatModelId } from "@/lib/chat-models";
 import { DEFAULT_KNOWLEDGE_MODE } from "@/lib/knowledge-mode";
 import { DEFAULT_THEME_MODE, isThemeMode, type ThemeMode } from "@/lib/theme";
 import { Conversation, ConversationFile, Message, ROLES } from "@/lib/types";
@@ -60,6 +61,7 @@ function buildUploadStatus(files: ConversationFile[]): string | null {
 
 export default function Home() {
   const { viewer, loading: viewerLoading } = useAppViewer();
+  const modelIds = useMemo(() => allowedModelIds(viewer), [viewer]);
   const allowedRoles = useMemo(
     () => filterVisibleKbChatRoles(ROLES, viewer?.kbChatRoles),
     [viewer?.kbChatRoles],
@@ -69,6 +71,9 @@ export default function Home() {
   const [role, setRole] = useState<string | null>(null);
   const [roleName, setRoleName] = useState<string>("选择岗位");
   const [selectedModelId, setSelectedModelId] = useState<ChatModelId>(DEFAULT_CHAT_MODEL_ID);
+  useEffect(() => {
+    if (modelIds.length && !modelIds.includes(selectedModelId)) setSelectedModelId(modelIds[0]);
+  }, [modelIds, selectedModelId]);
   const [selectedAnswerMode, setSelectedAnswerMode] = useState<AnswerMode>(DEFAULT_ANSWER_MODE);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(DEFAULT_THEME_MODE);
@@ -546,7 +551,7 @@ export default function Home() {
   }, [activeId]);
 
   const handleSend = useCallback(async (text: string) => {
-    if (isStreaming || !role) return;
+    if (isStreaming || !role || !modelIds.includes(selectedModelId)) return;
 
     const { conversationId, conversationList } = ensureConversationContext();
     let currentConvos = conversationList;
@@ -689,10 +694,10 @@ export default function Home() {
     } finally {
       setIsStreaming(false);
     }
-  }, [ensureConversationContext, isStreaming, role, selectedModelId, selectedAnswerMode, webSearchEnabled]);
+  }, [ensureConversationContext, isStreaming, role, modelIds, selectedModelId, selectedAnswerMode, webSearchEnabled]);
 
   const handleGenerateReport = useCallback(async () => {
-    if (!activeConvo || isGeneratingReport || isStreaming || !role) return;
+    if (!activeConvo || isGeneratingReport || isStreaming || !role || !modelIds.includes(selectedModelId) || !modelIds.includes(REPORT_MODEL_ID)) return;
 
     setIsReportModalOpen(true);
     setIsGeneratingReport(true);
@@ -728,7 +733,7 @@ export default function Home() {
     } finally {
       setIsGeneratingReport(false);
     }
-  }, [activeConvo, isGeneratingReport, isStreaming, role, roleName, selectedModelId, selectedAnswerMode]);
+  }, [activeConvo, isGeneratingReport, isStreaming, role, roleName, modelIds, selectedModelId, selectedAnswerMode]);
 
   if (!mounted) {
     return (
@@ -802,12 +807,13 @@ export default function Home() {
             files={activeFiles}
             isStreaming={isStreaming}
             isGeneratingReport={isGeneratingReport}
-            canGenerateReport={Boolean(activeConvo && activeConvo.messages.length > 0)}
+            canGenerateReport={Boolean(activeConvo && activeConvo.messages.length > 0 && modelIds.includes(selectedModelId) && modelIds.includes(REPORT_MODEL_ID))}
             onSend={handleSend}
             onUpload={handleUpload}
             onToggleFile={handleToggleFile}
             onDeleteFile={handleDeleteFile}
             onGenerateReport={handleGenerateReport}
+            allowedModelIds={modelIds}
             selectedModelId={selectedModelId}
             onModelChange={setSelectedModelId}
             selectedAnswerMode={selectedAnswerMode}

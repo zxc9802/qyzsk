@@ -89,3 +89,5 @@ export function getChatModelOption(modelId?: string | null): ChatModelOption {
 
   return CHAT_MODELS.find((model) => model.id === modelId) || CHAT_MODELS[0];
 }
+
+export const REPORT_MODEL_ID: ChatModelId = "yunwu-gemini-3-flash-preview";
