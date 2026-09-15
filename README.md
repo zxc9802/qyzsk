@@ -145,3 +145,5 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 - 单次最多 200 条消息、1 MB 文字、单个媒体 20 MB、媒体合计 50 MB；不支持的媒体格式会提示错误。
 - 配置 `DATABASE_URL` 时自动创建 `kb_chat_shares` 表；否则保存到现有 `.kb-chat-data/shares` 目录。文件部署需持久化该目录，多实例部署需共用数据库。
 - 公共页面为 `/share/<token>`，仅该页面及分享媒体接口绕过 SSO。页面禁止索引并禁用引用来源信息。
+
+可选数据库集成测试：将 `KB_CHAT_SHARE_TEST_DATABASE_URL` 指向本机名称含 `test` 的 PostgreSQL 或 PGlite 测试数据库，再运行 `npm test -- lib/server/chat-share-store.postgres.test.ts`。该测试创建随机测试账号记录并按记录 ID 清理，不删除表；未设置该变量时默认跳过。
