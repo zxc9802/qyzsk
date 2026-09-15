@@ -29,6 +29,14 @@ function getDbPool() {
 
 async function runSchemaSetup(client: PoolClient) {
   await client.query(`
+    CREATE TABLE IF NOT EXISTS kb_chat_shares (
+      token TEXT PRIMARY KEY,
+      snapshot_json JSONB NOT NULL,
+      created_at_ms BIGINT NOT NULL
+    )
+  `);
+
+  await client.query(`
     CREATE TABLE IF NOT EXISTS kb_chat_conversations (
       user_id TEXT NOT NULL,
       id TEXT NOT NULL,

@@ -18,12 +18,13 @@ export async function proxy(request: NextRequest) {
   }
 
   const { pathname, searchParams } = request.nextUrl;
-  const requestedMainAppUrl = resolveRequestedMainAppUrl(request);
   const ticket = searchParams.get("ticket")?.trim();
 
   if (shouldBypassSso(pathname)) {
     return NextResponse.next();
   }
+
+  const requestedMainAppUrl = resolveRequestedMainAppUrl(request);
 
   if (ticket && !pathname.startsWith("/api/")) {
     try {

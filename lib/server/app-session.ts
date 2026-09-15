@@ -335,7 +335,9 @@ export function buildClearedSessionCookie() {
 }
 
 export function shouldBypassSso(pathname: string) {
-  return pathname === "/api/health";
+  return pathname === "/api/health"
+    || /^\/share\/[^/]+$/.test(pathname)
+    || /^\/api\/shares\/[A-Za-z0-9_-]{43}\/media\/(0|[1-9]\d{0,3})$/.test(pathname);
 }
 
 export function isHtmlDocumentRequest(request: Pick<Request, "method" | "headers">, pathname: string) {
