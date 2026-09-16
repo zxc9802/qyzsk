@@ -80,12 +80,23 @@ export function mergeStreamUsage(
   return { inputTokens, cachedInputTokens, outputTokens, reasoningTokens, totalTokens };
 }
 
-function resolveUsageMonitorUrl() {
+function resolveUsageMonitorUrl(providerId: string) {
   const explicitUrl = process.env.USAGE_MONITOR_URL?.trim();
-  if (explicitUrl) return explicitUrl;
+  if (explicitUrl) {
+    if (providerId === "openlux") {
+      const url = new URL(explicitUrl);
+      const path = url.pathname.replace(/\/api\/internal\/usage-events\/?$/, "/api/sso/usage");
+      if (path !== url.pathname) {
+        url.pathname = path;
+        return url.toString();
+      }
+    }
+    return explicitUrl;
+  }
 
   const mainAppUrl = process.env.MAIN_APP_URL?.trim().replace(/\/+$/, "");
-  return mainAppUrl ? `${mainAppUrl}/api/internal/usage-events` : "";
+  const path = providerId === "openlux" ? "/api/sso/usage" : "/api/internal/usage-events";
+  return mainAppUrl ? `${mainAppUrl}${path}` : "";
 }
 
 export async function reportKbChatTextUsage(input: {
@@ -95,18 +106,37 @@ export async function reportKbChatTextUsage(input: {
   usage: KbChatTokenUsage;
   groupMultiplier?: number;
 }) {
-  const endpoint = resolveUsageMonitorUrl();
   const secret = process.env.USAGE_MONITOR_INTERNAL_SECRET?.trim();
-  if (!endpoint || !secret) return;
+  if (!secret) return;
 
   try {
+    const endpoint = resolveUsageMonitorUrl(input.providerId);
+    if (!endpoint) return;
+    const isOpenLux = input.providerId === "openlux";
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: {
+      headers: isOpenLux ? {
+        "Content-Type": "application/json",
+        "x-usage-tool": "kb-chat",
+        "x-usage-secret": secret,
+      } : {
         "Content-Type": "application/json",
         "x-usage-monitor-secret": secret,
       },
-      body: JSON.stringify({
+      body: JSON.stringify(isOpenLux ? {
+        userId: input.user.userId,
+        requestId: randomUUID(),
+        provider: new URL(process.env.OPENLUX_API_BASE_URL?.trim() || "https://api.openlux.ai").hostname,
+        model: input.model,
+        status: "completed",
+        tokenBasis: "reported",
+        inputTokens: input.usage.inputTokens,
+        cachedInputTokens: input.usage.cachedInputTokens,
+        cacheWriteTokens: 0,
+        outputTokens: input.usage.outputTokens,
+        reasoningTokens: input.usage.reasoningTokens,
+        totalTokens: input.usage.inputTokens + input.usage.outputTokens,
+      } : {
         userId: input.user.userId,
         userEmail: input.user.account,
         userNickname: input.user.nickname,
