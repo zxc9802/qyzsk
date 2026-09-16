@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CHAT_MODELS, getChatModelOption } from "@/lib/chat-models";
+import { CHAT_MODELS, DEFAULT_CHAT_MODEL_ID, getChatModelOption, isChatModelId } from "@/lib/chat-models";
 
 test("primary chat model is displayed and routed as Claude Opus 4.6", () => {
   const primary = getChatModelOption("gemini-3.1-pro-preview");
@@ -36,6 +36,19 @@ test("other chat model labels stay unchanged", () => {
       ["yunwu-gemini-3-flash-preview", "Gemini 快速"],
     ]
   );
+});
+
+test("GPT-6 is selectable and shares the GPT-5.6 provider and key", () => {
+  assert.equal(isChatModelId("yunwu-gpt-6"), true);
+  const gpt6 = getChatModelOption("yunwu-gpt-6");
+  const gpt56 = getChatModelOption("yunwu-gpt-5.6");
+  assert.equal(gpt6.label, "GPT-6");
+  assert.equal(gpt6.shortLabel, "GPT-6");
+  assert.equal(gpt6.apiModel, "gpt-6-astra");
+  assert.equal(gpt6.provider, gpt56.provider);
+  assert.equal(gpt6.apiKeyEnvName, undefined);
+  assert.equal(gpt6.apiModelEnvName, undefined);
+  assert.equal(DEFAULT_CHAT_MODEL_ID, "gemini-3.1-pro-preview");
 });
 
 test("Gemini quick routes to the configured Yunwu Gemini chat model", () => {

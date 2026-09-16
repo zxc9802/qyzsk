@@ -109,6 +109,14 @@ const DEFAULT_CONTEXT_BUDGETS: Record<string, ContextBudgetConfig> = {
     emergencyThresholdRatio: DEFAULT_EMERGENCY_THRESHOLD_RATIO,
     recentWindowMessageCount: CONTEXT_WINDOW_MESSAGE_COUNT,
   },
+  "yunwu-gpt-6": {
+    modelId: "yunwu-gpt-6",
+    maxContextChars: 90_000,
+    reservedChars: 24_000,
+    conversationBudgetChars: 66_000,
+    emergencyThresholdRatio: DEFAULT_EMERGENCY_THRESHOLD_RATIO,
+    recentWindowMessageCount: CONTEXT_WINDOW_MESSAGE_COUNT,
+  },
 };
 const COMPRESSION_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000] as const;
 

@@ -26,3 +26,10 @@ test("old signed sessions refresh revoked models and cannot use another user's r
     globalThis.fetch=async()=>{throw Error("offline")};await assert.rejects(assertAppSession(request));
   } finally {globalThis.fetch=originalFetch;for(const key of ["REQUIRE_MAIN_APP_SSO","MAIN_APP_URL","KB_CHAT_SESSION_SECRET"]) {if(saved[key]===undefined)delete process.env[key];else process.env[key]=saved[key];}}
 });
+
+test("GPT-6 requires an explicit knowledge-base grant for members", () => {
+  const user = (modelKeys: string[]) => ({ role: "member", modelAccess: { sites: [{ siteKey: "kb-chat", mode: "selected", modelKeys }] } });
+  assert.deepEqual(allowedModelIds(user(["yunwu-gpt-6"])), ["yunwu-gpt-6"]);
+  assert.equal(allowedModelIds(user(["yunwu-gpt-5.6"])).includes("yunwu-gpt-6"), false);
+  assert.ok(allowedModelIds({ role: "admin" }).includes("yunwu-gpt-6"));
+});
