@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 
 /**
  * PWA 安装引导 + Service Worker 注册。
@@ -31,6 +32,7 @@ function isStandaloneDisplay(): boolean {
 }
 
 export default function PwaInstaller() {
+  const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [installable, setInstallable] = useState(false);
   const [iosDevice, setIosDevice] = useState(false);
@@ -159,7 +161,7 @@ export default function PwaInstaller() {
     [installDismissed, installed, installable, iosDevice, mounted]
   );
 
-  if (!mounted) return null;
+  if (!mounted || pathname.startsWith("/share/")) return null;
 
   return (
     <>

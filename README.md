@@ -135,3 +135,15 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+# 聊天记录分享
+
+在对话中点击「分享聊天记录」，勾选用户或助手消息，也可全选、取消全选或取消。生成后可复制链接，接收者无需登录即可查看。
+
+- 创建分享使用主站 SSO 会话并实时校验账号，只能选择当前账号已保存的对话消息。未启用 SSO 的本地调试身份不能创建公共链接。
+- 链接使用 256 位随机令牌。只保存所选消息，保持原对话顺序；标题固定，不公开用户身份、原对话标题、知识库引用详情或诊断数据。
+- 文字及所选图片、视频保存为独立快照，后续编辑或删除原对话不会改变分享内容。当前不提供撤销或自动过期。
+- 单次最多 200 条消息、1 MB 文字、单个媒体 20 MB、媒体合计 50 MB；不支持的媒体格式会提示错误。
+- 配置 `DATABASE_URL` 时自动创建 `kb_chat_shares` 表；否则保存到现有 `.kb-chat-data/shares` 目录。文件部署需持久化该目录，多实例部署需共用数据库。
+- 公共页面为 `/share/<token>`，仅该页面及分享媒体接口绕过 SSO。页面禁止索引并禁用引用来源信息。
+
+可选数据库集成测试：将 `KB_CHAT_SHARE_TEST_DATABASE_URL` 指向本机名称含 `test` 的 PostgreSQL 或 PGlite 测试数据库，再运行 `npm test -- lib/server/chat-share-store.postgres.test.ts`。该测试创建随机测试账号记录并按记录 ID 清理，不删除表；未设置该变量时默认跳过。

@@ -5,7 +5,7 @@ import { AnswerMode } from "@/lib/answer-modes";
 import { ChatModelId } from "@/lib/chat-models";
 import { ThemeMode } from "@/lib/theme";
 import { ConversationFile, Message } from "@/lib/types";
-import MessageBubble from "./MessageBubble";
+import ShareableMessages from "./ShareableMessages";
 import EmptyState from "./EmptyState";
 import InputBar from "./InputBar";
 
@@ -21,6 +21,7 @@ interface ChatAreaProps {
   onToggleFile: (fileId: string, nextActive: boolean) => void;
   onDeleteFile: (fileId: string) => void;
   onGenerateReport: () => void;
+  onBeforeShare: () => Promise<boolean>;
   allowedModelIds: ChatModelId[];
   selectedModelId: ChatModelId;
   onModelChange: (modelId: ChatModelId) => void;
@@ -54,6 +55,7 @@ export default function ChatArea({
   onToggleFile,
   onDeleteFile,
   onGenerateReport,
+  onBeforeShare,
   allowedModelIds,
   selectedModelId,
   onModelChange,
@@ -215,14 +217,7 @@ export default function ChatArea({
       ) : (
         <div ref={scrollRef} className="relative flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-6 md:px-10 md:py-8">
           <div className="mx-auto max-w-6xl">
-            {messages.map((msg, i) => (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                isStreaming={isStreaming && i === messages.length - 1 && msg.role === "assistant"}
-                showQuestionDiagnosis={msg.id === firstClarificationMessageId}
-              />
-            ))}
+            <ShareableMessages key={conversationId} conversationId={conversationId || ""} messages={messages} isStreaming={isStreaming} firstClarificationMessageId={firstClarificationMessageId} onBeforeShare={onBeforeShare} />
           </div>
         </div>
       )}

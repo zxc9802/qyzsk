@@ -116,14 +116,16 @@ export default function Home() {
 
       const data = await readJsonSafely<StateResponsePayload>(response);
       if (redirectToMainAppIfNeeded(response, data)) {
-        return;
+        return false;
       }
 
       if (!response.ok) {
         throw new Error(extractApiErrorMessage(data, "保存聊天状态失败"));
       }
+      return true;
     } catch (error) {
       console.error("State save error:", error);
+      return false;
     }
   }, []);
 
@@ -802,6 +804,10 @@ export default function Home() {
             onMobileClose={() => setMobileSidebarOpen(false)}
           />
           <ChatArea
+            onBeforeShare={() => persistState({
+              conversations, activeId,
+              settings: role ? { role, roleName, chatModelId: selectedModelId, answerMode: selectedAnswerMode, knowledgeMode: DEFAULT_KNOWLEDGE_MODE, webSearchEnabled, themeMode } : null,
+            })}
             conversationId={activeId}
             messages={activeConvo?.messages || []}
             files={activeFiles}
