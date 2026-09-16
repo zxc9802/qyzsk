@@ -16,6 +16,17 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+### GPT-6 模型配置
+
+聊天模型列表中的 `GPT-6` 调用 OpenLux 的 `gpt-6-astra`，与 GPT-5.6 共用服务端配置：
+
+```dotenv
+OPENLUX_API_BASE_URL=https://api.openlux.ai
+OPENLUX_API_KEY=填写现有GPT-5.6使用的Key
+```
+
+如果 GPT-5.6 已配置可用，无需新增环境变量，也无需修改默认模型。部署新版后，管理员可直接使用 GPT-6；普通员工需由管理员在主站后台的“起芽知识库机器人”模型权限中勾选 `GPT-6`，主站也需部署支持该权限的新版。GPT-6 沿用 GPT-5.6 的应用上下文压缩预算。
+
 ### Wiki Admin
 
 The app now supports a `Wiki 优先 / 仅 KB` knowledge mode toggle in chat and a dedicated admin review console at `/admin`.

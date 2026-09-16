@@ -6,6 +6,7 @@ import {
   createConversationContextKey,
   evaluateCompressionPlan,
   getCompressionRetryDelayMs,
+  getContextBudgetConfig,
   isLikelyContextOverflowError,
   type ContextBudgetConfig,
 } from "@/lib/server/conversation-context";
@@ -40,6 +41,11 @@ const BASE_BUDGET: ContextBudgetConfig = {
   emergencyThresholdRatio: 0.92,
   recentWindowMessageCount: 8,
 };
+
+test("GPT-6 uses the existing GPT conversation budget rather than the default model budget", () => {
+  const previous = getContextBudgetConfig("yunwu-gpt-5.6");
+  assert.deepEqual(getContextBudgetConfig("yunwu-gpt-6"), { ...previous, modelId: "yunwu-gpt-6" });
+});
 
 test("evaluateCompressionPlan keeps none before the eleventh user turn", () => {
   const plan = evaluateCompressionPlan({

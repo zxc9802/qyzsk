@@ -4,7 +4,8 @@ export type ChatModelId =
   | "gemini-3.1-pro-preview"
   | "yunwu-gemini-3-flash-preview"
   | "yunwu-gpt-5.4"
-  | "yunwu-gpt-5.6";
+  | "yunwu-gpt-5.6"
+  | "yunwu-gpt-6";
 
 export interface ChatModelOption {
   id: ChatModelId;
@@ -72,6 +73,14 @@ export const CHAT_MODELS: ChatModelOption[] = [
     provider: "openlux",
     apiModel: "gpt-5.6-luna",
     description: "走 OpenLux 的 GPT-5.6 Luna",
+  },
+  {
+    id: "yunwu-gpt-6",
+    label: "GPT-6",
+    shortLabel: "GPT-6",
+    provider: "openlux",
+    apiModel: "gpt-6-astra",
+    description: "走 OpenLux 的 GPT-6 Astra",
   },
 ];
 
