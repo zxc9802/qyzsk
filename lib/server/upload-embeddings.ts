@@ -1,3 +1,4 @@
+import { usageFetch } from "@/lib/server/openlux-reporting";
 import { promises as fs } from "fs";
 import path from "path";
 import sharp from "sharp";
@@ -135,7 +136,7 @@ export async function requestUploadEmbedding(parts: UploadEmbeddingPart[]): Prom
     throw new Error("未配置 UPLOAD_EMBEDDING_API_KEY，无法在上传时生成向量。");
   }
 
-  const response = await fetch(config.apiUrl, {
+  const response = await usageFetch(config.apiUrl, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.apiKey}`,

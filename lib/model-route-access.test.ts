@@ -4,12 +4,14 @@ import fs from "node:fs";
 import ts from "typescript";
 import { allowedModelIds } from "@/lib/model-access";
 import * as models from "@/lib/chat-models";
+import { withUsageUser } from "@/lib/server/openlux-reporting";
 
 function loadRoute(file: string, user: Record<string, unknown>) {
   const loaded = { exports: {} as { POST: (req: Request) => Promise<Response> } };
   const stubs: Record<string, unknown> = {
     "@/lib/model-access": { allowedModelIds },
     "@/lib/chat-models": models,
+    "@/lib/server/openlux-reporting": { withUsageUser, usageFetch: () => { throw Error("Provider called before authorization"); } },
     "@/lib/server/app-session": { assertAppUserSession: async () => ({ userId: "member", session: { user }, user }), appSessionErrorResponse: () => Response.json({}, {status:401}) },
     "@/lib/kb-chat-role-access": { parseKbChatRoleAccess: () => ({}), canUseKbChatRole: () => true },
   };

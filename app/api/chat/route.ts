@@ -1,3 +1,4 @@
+import { usageFetch, withUsageUser, isOpenLuxUrl } from "@/lib/server/openlux-reporting";
 import { allowedModelIds } from "@/lib/model-access";
 import { NextRequest } from "next/server";
 import { DEFAULT_ANSWER_MODE, isAnswerMode } from "@/lib/answer-modes";
@@ -218,7 +219,7 @@ async function runModelDiagnosis(
   apiModel: string,
   prompt: string | OpenAIContentPart[]
 ): Promise<string | null> {
-  const response = await fetch(apiUrl, {
+  const response = await usageFetch(apiUrl, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -261,7 +262,7 @@ async function runClaudeModelDiagnosis(
   apiModel: string,
   prompt: string | OpenAIContentPart[]
 ): Promise<string | null> {
-  const response = await fetch(apiUrl, {
+  const response = await usageFetch(apiUrl, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -648,6 +649,7 @@ export async function POST(req: NextRequest) {
       return appSessionErrorResponse(error, req);
     }
 
+    return await withUsageUser(userId, async () => {
     const {
       message,
       role,
@@ -1083,17 +1085,6 @@ export async function POST(req: NextRequest) {
           input: responsesRequest.input,
           maxOutputTokens: 4096,
         });
-        const usage = mergeStreamUsage(null, extractStreamUsageFragment(result.payload));
-        if (usage && usageUser) {
-          await reportKbChatTextUsage({
-            user: usageUser,
-            model: apiModel,
-            providerId: modelOption.provider,
-            usage,
-            groupMultiplier: Number(process.env.OPENLUX_GROUP_MULTIPLIER) || 1,
-          });
-        }
-
         return createSseEventResponse(
           [
             ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
@@ -1114,7 +1105,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    let response = await fetch(provider.apiUrl, {
+    let response = await usageFetch(provider.apiUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${provider.apiKey}`,
@@ -1146,7 +1137,7 @@ export async function POST(req: NextRequest) {
         recentHistory = emergencyState.recentHistory;
         conversationMemoryContext = buildConversationMemoryContext(emergencyState.contextState?.memoryText || "");
         messages = buildProviderMessages(recentHistory, conversationMemoryContext);
-        response = await fetch(provider.apiUrl, {
+        response = await usageFetch(provider.apiUrl, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${provider.apiKey}`,
@@ -1284,7 +1275,7 @@ export async function POST(req: NextRequest) {
         } catch (error) {
           console.error("Stream read error:", error);
         } finally {
-          if (capturedUsage && usageUser) {
+          if (capturedUsage && usageUser && !isOpenLuxUrl(provider.apiUrl)) {
             const groupMultiplier = modelOption.provider === "newapi"
               ? Number(process.env.NEWAPI_GROUP_MULTIPLIER) || 1
               : modelOption.provider === "yunwu_claude_messages"
@@ -1310,6 +1301,7 @@ export async function POST(req: NextRequest) {
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
       },
+    });
     });
   } catch (error) {
     console.error("Chat API error:", error);

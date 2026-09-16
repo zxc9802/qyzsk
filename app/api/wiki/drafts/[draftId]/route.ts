@@ -1,3 +1,4 @@
+import { withUsageUser } from "@/lib/server/openlux-reporting";
 import { NextRequest } from "next/server";
 import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
 import { applyWikiDraftAction, type WikiDraftAction } from "@/lib/server/wiki-review";
@@ -9,8 +10,9 @@ export async function PATCH(
   req: NextRequest,
   context: { params: Promise<{ draftId: string }> }
 ) {
+  let usageUserId: string | undefined;
   try {
-    await assertWikiAdminAccess(req);
+    usageUserId = (await assertWikiAdminAccess(req)).userId;
   } catch (error) {
     return wikiAdminAuthErrorResponse(error, req);
   }
@@ -19,7 +21,7 @@ export async function PATCH(
     const { draftId } = await context.params;
     const body = await req.json();
     const action = body.action as WikiDraftAction;
-    const nextDraft = await applyWikiDraftAction(draftId, action, body);
+    const nextDraft = await withUsageUser(usageUserId, () => applyWikiDraftAction(draftId, action, body));
 
     return new Response(JSON.stringify({ draft: nextDraft }), {
       headers: { "Content-Type": "application/json" },

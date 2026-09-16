@@ -1,3 +1,4 @@
+import { withUsageUser } from "@/lib/server/openlux-reporting";
 import { NextRequest } from "next/server";
 import { deriveRelatedPageIds, normalizeWikiRelations } from "@/lib/wiki-relations";
 import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
@@ -23,8 +24,9 @@ export async function PATCH(
   req: NextRequest,
   context: { params: Promise<{ pageId: string[] }> }
 ) {
+  let usageUserId: string | undefined;
   try {
-    await assertWikiAdminAccess(req);
+    usageUserId = (await assertWikiAdminAccess(req)).userId;
   } catch (error) {
     return wikiAdminAuthErrorResponse(error, req);
   }
@@ -45,7 +47,7 @@ export async function PATCH(
     const normalizedRelations = normalizeWikiRelations(body.relations);
     const normalizedRelatedPages = normalizeStringList(body.relatedPages);
 
-    const updatedPage = await updatePublishedPage(resolvedPageId, (current) => ({
+    const updatedPage = await withUsageUser(usageUserId, () => updatePublishedPage(resolvedPageId, (current) => ({
       ...current,
       title: typeof body.title === "string" ? body.title.trim() || current.title : current.title,
       summary: typeof body.summary === "string" ? body.summary.trim() || current.summary : current.summary,
@@ -57,7 +59,7 @@ export async function PATCH(
           ? deriveRelatedPageIds(normalizedRelations, normalizedRelatedPages || current.relatedPages)
           : normalizedRelatedPages || current.relatedPages,
       content: typeof body.content === "string" ? body.content.trim() || current.content : current.content,
-    }));
+    })));
 
     return new Response(JSON.stringify({ page: updatedPage }), {
       headers: { "Content-Type": "application/json" },

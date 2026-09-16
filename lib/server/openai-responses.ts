@@ -1,3 +1,4 @@
+import { usageFetch } from "@/lib/server/openlux-reporting";
 export type OpenAIResponsesPayload = {
   model?: string;
   output_text?: string;
@@ -42,7 +43,7 @@ export async function generateResponsesText(options: {
   maxOutputTokens?: number;
   fetchImpl?: typeof fetch;
 }): Promise<{ text: string; payload: OpenAIResponsesPayload }> {
-  const fetchImpl = options.fetchImpl || fetch;
+  const fetchImpl = options.fetchImpl || usageFetch;
   const response = await fetchImpl(`${normalizeBaseUrl(options.baseUrl)}/responses`, {
     method: "POST",
     headers: {

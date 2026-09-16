@@ -13,6 +13,7 @@
     "test": "node --test --experimental-strip-types --import ./scripts/wiki/register-alias.mjs",
     "eval:retrieval": "node --import ./scripts/wiki/register-alias.mjs --experimental-strip-types ./scripts/evals/run-retrieval-eval.ts",
     "lint": "eslint",
+    "usage:retry": "node --import ./scripts/wiki/register-alias.mjs --experimental-strip-types ./scripts/retry-usage.ts",
     "wiki:import-docx": "node --import ./scripts/wiki/register-alias.mjs --experimental-strip-types ./scripts/wiki/import-docx-batch.ts",
     "rag:reindex-wiki": "node --import ./scripts/wiki/register-alias.mjs --experimental-strip-types ./scripts/rag/reindex-wiki.ts",
     "rag:reindex-kb": "node --import ./scripts/wiki/register-alias.mjs --experimental-strip-types ./scripts/rag/reindex-kb.ts"

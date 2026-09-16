@@ -29,7 +29,7 @@ OPENLUX_API_KEY=填写现有GPT-5.6使用的Key
 
 ### OpenLux 用量上报
 
-OpenLux 聊天回复返回 Token 用量后，知识库使用已验证会话中的主站用户 ID，将实际模型、输入、缓存命中、输出和推理 Token 上报至主站 `POST /api/sso/usage`。来源工具固定为 `kb-chat`，使用服务端 `x-usage-tool` 和 `x-usage-secret` 请求头鉴权。
+知识库使用已验证会话或服务端任务的主站用户 ID，将每次 OpenLux 模型请求的状态和实际 Token 上报至主站 `POST /api/sso/usage`。来源工具固定为 `kb-chat`，使用服务端 `x-usage-tool` 和 `x-usage-secret` 请求头鉴权。
 
 知识库部署环境需配置：
 
@@ -41,10 +41,13 @@ USAGE_MONITOR_INTERNAL_SECRET=replace-with-at-least-32-random-characters
 主站部署环境的 `SSO_USAGE_SECRETS` JSON 中，增加 `"kb-chat"` 键，其值必须与知识库的 `USAGE_MONITOR_INTERNAL_SECRET` 完全一致，且至少 32 个字符；保留已有其它工具的键。密钥只放服务端环境变量，不使用 `NEXT_PUBLIC_*`。两端部署配置均生效后才能接收上报。
 
 - `USAGE_MONITOR_URL` 留空时使用 `MAIN_APP_URL + /api/sso/usage`。若显式地址的路径以 `/api/internal/usage-events`（可带末尾 `/`）结尾，仅 OpenLux 上报自动改为 `/api/sso/usage`，保留原域名、路径前缀和查询参数。其它自定义 URL 保持原值，但必须支持上述 SSO 协议。
-- `provider` 取 `OPENLUX_API_BASE_URL` 的实际域名，默认 `api.openlux.ai`。若该地址改为其它供应商，主站将按实际域名匹配费率，不会将其标记为 OpenLux。
-- 上报不包含 API Key、提示词、回复正文或金额。输入已包含缓存命中，输出已包含推理 Token；总量为输入加输出，不重复累计。OpenAI 用量的缓存写入为 `0`。
-- 金额由主站按供应商域名和实际模型对应的费率计算；本路径不使用 `OPENLUX_GROUP_MULTIPLIER` 或 `USAGE_MONITOR_USD_CNY_RATE`。缺少配置或上游未返回用量时不发送；网络或鉴权失败只记录服务端错误，不影响回复，也不会自动重试或补回历史用量。
-- 此适配仅覆盖 `openlux` 模型提供商的聊天回复上报。云雾及其它提供商保持原有上报路径、鉴权和格式。
+- 仅实际上游请求域名为 `api.openlux.ai` 时进入新上报；覆盖聊天回复、问题诊断、上下文压缩、报告、知识导入/发布、媒体解析、上传向量化及检索向量化。即使配置项名称是 `YUNWU_*` 或 `NEWAPI_*`，也按实际 URL 判断。云雾等实际域名保持原有行为。
+- 上报不包含 API Key、提示词、回复正文、图片或金额。缺失 Token 为 `null`，真实零值为 `0`；输入包含缓存，输出包含推理，总量为输入加输出。Anthropic 输入的独立缓存桶只加一次。
+- 每次实际上游请求独立 UUID；投递重试复用 UUID。调用开始为 `pending`，成功为 `completed`，网络失败或流中断分别为 `failed`/`interrupted`。上游未返回 Token 也记录调用，图片按次模型可由主站计价。缺少单价（例如 `gemini-embedding-2-preview`）显示待核算。
+- 启用现有 `DATABASE_URL` 时自动创建 `kb_chat_usage_outbox` 表。否则队列写入 `.kb-chat-data/usage-outbox`，可设置 `USAGE_MONITOR_OUTBOX_DIR=/持久化目录/kb-usage`；文件目录必须位于持久卷、非公开目录，多实例共享存储。无持久磁盘的部署应配置数据库。
+- 元数据先持久化，投递失败继续保留；后续模型调用会补报，每批最多 20 条、投递总时限约 8 秒。闲置时可在已加载部署环境变量的终端运行 `npm run usage:retry`，也可由现有调度器定期执行。主站必须返回 JSON `success: true` 才确认接收。
+- 先部署支持 `pending` 的新版主站，再部署知识库。无需新增 API Key；上报共享密钥与 OpenLux API Key 不同。历史没有记录的调用无法凭空补算。进程被终止时的 `pending` 不自动视为成功；磁盘/数据库不可写会输出服务端日志，需要恢复存储。
+- 本地调试身份及命令行全库重建没有已验证员工会话，不会冒用员工计费。网页上传、发布和检索的调用正常按操作员工上报。
 
 ### Wiki Admin
 

@@ -1,3 +1,4 @@
+import { withUsageUser } from "@/lib/server/openlux-reporting";
 import { REPORT_MODEL_ID } from "@/lib/chat-models";
 import { allowedModelIds } from "@/lib/model-access";
 import { NextRequest } from "next/server";
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest) {
       return createJsonResponse({ error: "管理员未向该账号开放此模型。" }, 403);
     }
     await ensureConversationRecord(userId, body.conversationId, body.conversationTitle);
-    const report = await buildConversationReport(body, userId);
+    const report = await withUsageUser(userId, () => buildConversationReport(body, userId));
     return createJsonResponse({ report }, 200);
   } catch (error) {
     console.error("Report API error:", error);

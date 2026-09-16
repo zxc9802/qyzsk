@@ -1,3 +1,4 @@
+import { withUsageUser } from "@/lib/server/openlux-reporting";
 import { approveIngestedWikiSource, createDraftsFromSource } from "@/lib/server/wiki-drafts";
 import { processWikiUploadInputs } from "@/lib/server/wiki-media";
 import { createWikiSourceRecord, readWikiSourceRecord, updateWikiSourceRecord } from "@/lib/server/wiki-store";
@@ -34,6 +35,7 @@ export async function runWikiIngestJob(options: {
   files: WikiIngestFileInput[];
   autoApprove: boolean;
 }) {
+  return withUsageUser(options.submittedBy?.userId, async () => {
   try {
     const uploaded =
       options.files.length > 0
@@ -88,6 +90,7 @@ export async function runWikiIngestJob(options: {
       ingestError: message,
     }));
   }
+  });
 }
 
 export function describeQueuedIngest(source: WikiSourceRecord, autoApprove: boolean) {

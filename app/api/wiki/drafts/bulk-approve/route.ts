@@ -1,3 +1,4 @@
+import { withUsageUser } from "@/lib/server/openlux-reporting";
 import { NextRequest } from "next/server";
 import { assertWikiAdminAccess, wikiAdminAuthErrorResponse } from "@/lib/server/wiki-admin-auth";
 import { applyWikiDraftAction } from "@/lib/server/wiki-review";
@@ -18,8 +19,9 @@ type BulkApproveItem = {
 };
 
 export async function POST(req: NextRequest) {
+  let usageUserId: string | undefined;
   try {
-    await assertWikiAdminAccess(req);
+    usageUserId = (await assertWikiAdminAccess(req)).userId;
   } catch (error) {
     return wikiAdminAuthErrorResponse(error, req);
   }
@@ -44,7 +46,7 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const approvedDraft = await applyWikiDraftAction(item.draftId, "approve", item);
+      const approvedDraft = await withUsageUser(usageUserId, () => applyWikiDraftAction(item.draftId!, "approve", item));
       approvedDrafts.push(approvedDraft);
     }
 

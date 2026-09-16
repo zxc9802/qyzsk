@@ -1,3 +1,4 @@
+import { withUsageUser } from "@/lib/server/openlux-reporting";
 import { processUploadedFile } from "@/lib/server/file-processing";
 import {
   ConversationFileRecord,
@@ -75,7 +76,7 @@ async function runJob(job: ProcessingJob) {
     const latestRecord = await getFileRecord(job.userId, job.conversationId, job.fileId);
     if (!latestRecord || latestRecord.status !== "processing") return;
 
-    await processUploadedFile(latestRecord);
+    await withUsageUser(latestRecord.userId, () => processUploadedFile(latestRecord));
   } catch (error) {
     console.error("Background file processing error:", job.fileId, error);
   } finally {
