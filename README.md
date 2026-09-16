@@ -27,6 +27,25 @@ OPENLUX_API_KEY=填写现有GPT-5.6使用的Key
 
 如果 GPT-5.6 已配置可用，无需新增环境变量，也无需修改默认模型。部署新版后，管理员可直接使用 GPT-6；普通员工需由管理员在主站后台的“起芽知识库机器人”模型权限中勾选 `GPT-6`，主站也需部署支持该权限的新版。GPT-6 沿用 GPT-5.6 的应用上下文压缩预算。
 
+### OpenLux 用量上报
+
+OpenLux 聊天回复返回 Token 用量后，知识库使用已验证会话中的主站用户 ID，将实际模型、输入、缓存命中、输出和推理 Token 上报至主站 `POST /api/sso/usage`。来源工具固定为 `kb-chat`，使用服务端 `x-usage-tool` 和 `x-usage-secret` 请求头鉴权。
+
+知识库部署环境需配置：
+
+```dotenv
+MAIN_APP_URL=https://your-main-site.example.com
+USAGE_MONITOR_INTERNAL_SECRET=replace-with-at-least-32-random-characters
+```
+
+主站部署环境的 `SSO_USAGE_SECRETS` JSON 中，增加 `"kb-chat"` 键，其值必须与知识库的 `USAGE_MONITOR_INTERNAL_SECRET` 完全一致，且至少 32 个字符；保留已有其它工具的键。密钥只放服务端环境变量，不使用 `NEXT_PUBLIC_*`。两端部署配置均生效后才能接收上报。
+
+- `USAGE_MONITOR_URL` 留空时使用 `MAIN_APP_URL + /api/sso/usage`。若显式地址的路径以 `/api/internal/usage-events`（可带末尾 `/`）结尾，仅 OpenLux 上报自动改为 `/api/sso/usage`，保留原域名、路径前缀和查询参数。其它自定义 URL 保持原值，但必须支持上述 SSO 协议。
+- `provider` 取 `OPENLUX_API_BASE_URL` 的实际域名，默认 `api.openlux.ai`。若该地址改为其它供应商，主站将按实际域名匹配费率，不会将其标记为 OpenLux。
+- 上报不包含 API Key、提示词、回复正文或金额。输入已包含缓存命中，输出已包含推理 Token；总量为输入加输出，不重复累计。OpenAI 用量的缓存写入为 `0`。
+- 金额由主站按供应商域名和实际模型对应的费率计算；本路径不使用 `OPENLUX_GROUP_MULTIPLIER` 或 `USAGE_MONITOR_USD_CNY_RATE`。缺少配置或上游未返回用量时不发送；网络或鉴权失败只记录服务端错误，不影响回复，也不会自动重试或补回历史用量。
+- 此适配仅覆盖 `openlux` 模型提供商的聊天回复上报。云雾及其它提供商保持原有上报路径、鉴权和格式。
+
 ### Wiki Admin
 
 The app now supports a `Wiki 优先 / 仅 KB` knowledge mode toggle in chat and a dedicated admin review console at `/admin`.
