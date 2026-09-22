@@ -13,13 +13,13 @@ test("primary chat model is displayed and routed as Claude Opus 4.6", () => {
   assert.equal(primary.apiKeyEnvName, "YUNWU_CLAUDE_CHAT_API_KEY");
 });
 
-test("GPT selection routes to OpenRouter DeepSeek while retaining its display label", () => {
+test("GPT selection routes to OpenLux Luna while retaining its display label", () => {
   const gpt = getChatModelOption("yunwu-gpt-5.4");
 
   assert.equal(gpt.label, "GPT-5.5");
   assert.equal(gpt.shortLabel, "GPT-5.5");
-  assert.equal(gpt.provider, "openrouter");
-  assert.equal(gpt.apiModel, "deepseek/deepseek-v4.1-flash");
+  assert.equal(gpt.provider, "openlux");
+  assert.equal(gpt.apiModel, "gpt-5.6-luna");
 });
 
 test("other chat model labels stay unchanged", () => {

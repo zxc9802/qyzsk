@@ -109,9 +109,9 @@ export async function generateResponsesText(options: {
         response?: OpenAIResponsesPayload;
       };
       if (event.error || event.response?.error || ["error", "response.failed", "response.incomplete"].includes(event.type || "")) {
-        throw new Error("备用模型流式输出中断，请重新发送问题。");
+        throw new Error("OpenLux 流式输出中断，请重新发送问题。");
       }
-      if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
+      if (event.type === "response.output_text.delta" && typeof event.delta === "string" && event.delta) {
         text += event.delta;
         options.onContent(event.delta);
       }
@@ -120,12 +120,12 @@ export async function generateResponsesText(options: {
         break;
       }
     }
-    if (!payload) throw new Error("备用模型流式连接提前中断。");
+    if (!payload) throw new Error("OpenLux 流式连接提前中断。");
     if (!text) {
       text = extractResponsesText(payload);
       if (text) options.onContent(text);
     }
-    if (!text.trim()) throw new Error("备用模型返回了空内容。");
+    if (!text.trim()) throw new Error("OpenLux 返回了空内容。");
     return { text, payload };
   }
 

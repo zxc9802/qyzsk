@@ -84,11 +84,11 @@ const PROVIDER_CONFIG = {
     apiUrl: buildApiUrl(process.env.YUNWU_BASE_URL || "https://yunwu.ai/v1"),
     displayName: "Yunwu 网关",
   },
-  openrouter: {
-    apiKey: process.env.OPENROUTER_API_KEY?.trim() || "",
-    baseUrl: process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1",
-    apiUrl: buildApiUrl(process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1"),
-    displayName: "OpenRouter 网关",
+  openlux: {
+    apiKey: process.env.OPENLUX_API_KEY?.trim() || "",
+    baseUrl: process.env.OPENLUX_API_BASE_URL?.trim() || "https://api.openlux.ai",
+    apiUrl: buildApiUrl(process.env.OPENLUX_API_BASE_URL || "https://api.openlux.ai").replace(/\/chat\/completions$/, "/responses"),
+    displayName: "OpenLux 网关",
   },
   yunwu_claude_messages: {
     apiKey: process.env.YUNWU_CLAUDE_CHAT_API_KEY?.trim() || "",
@@ -288,7 +288,7 @@ async function runModelDiagnosis(
   prompt: string | OpenAIContentPart[],
   signal?: AbortSignal
 ): Promise<string | null> {
-  if (modelOption.provider === "openrouter") {
+  if (modelOption.id === "yunwu-gpt-5.4") {
     return generateGpt55Text({
       messages: [
         { role: "system", content: "你只做 JSON 诊断输出，不做业务回答，不要输出多余文字。" },
@@ -390,7 +390,7 @@ function isGeminiModel(modelOption: ReturnType<typeof getChatModelOption>): bool
 }
 
 function isGptModel(modelOption: ReturnType<typeof getChatModelOption>): boolean {
-  return modelOption.provider === "openrouter" || modelOption.apiModel.startsWith("gpt-");
+  return modelOption.id === "yunwu-gpt-5.4" || modelOption.apiModel.startsWith("gpt-");
 }
 
 function buildProviderRequestBody(
@@ -767,7 +767,7 @@ export async function POST(req: NextRequest) {
       const fallbackDiagnosisResult = diagnoseQuestion(message, role || "new", diagnosisHistory);
       let diagnosisResult = fallbackDiagnosisResult;
 
-      if ((provider.apiUrl && provider.apiKey) || modelOption.provider === "openrouter") {
+      if ((provider.apiUrl && provider.apiKey) || modelOption.id === "yunwu-gpt-5.4") {
         let diagnosisReview = null;
 
         if (fallbackDiagnosisResult.modelReviewPrompt) {
@@ -897,7 +897,7 @@ export async function POST(req: NextRequest) {
     const fileContext = retrieval.fileContext;
     const kbHits = retrieval.kbHits;
     const sourceHits = retrieval.sourceHits;
-    const canUseReliableWebSearch = isGptModel(modelOption) && !mediaContext.hasMedia && (provider.apiKey !== "" || (modelOption.provider === "openrouter" && Boolean(process.env.OPENLUX_API_KEY?.trim())));
+    const canUseReliableWebSearch = isGptModel(modelOption) && !mediaContext.hasMedia && (provider.apiKey !== "" || (modelOption.id === "yunwu-gpt-5.4" && Boolean(process.env.OPENROUTER_API_KEY?.trim())));
     const webSearchPolicy = buildWebSearchPolicyDecision({
       query: message,
       diagnosis,
@@ -1020,7 +1020,7 @@ export async function POST(req: NextRequest) {
 
       if (isGptModel(modelOption) && !mediaContext.hasMedia) {
         if (webSearchPolicy.shouldAutoSearchWeb) {
-          if (modelOption.provider !== "openrouter" && (!provider.baseUrl || !provider.apiKey)) {
+          if (modelOption.id !== "yunwu-gpt-5.4" && (!provider.baseUrl || !provider.apiKey)) {
           return createSseEventResponse(
             [
               ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
@@ -1030,7 +1030,7 @@ export async function POST(req: NextRequest) {
           }
 
           try {
-            if (modelOption.provider === "openrouter") {
+            if (modelOption.id === "yunwu-gpt-5.4") {
               return createGpt55StreamResponse({
                 request: {
                   messages: [
@@ -1084,7 +1084,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (modelOption.provider !== "openrouter" && (!provider.apiUrl || !provider.apiKey)) {
+    if (modelOption.id !== "yunwu-gpt-5.4" && (!provider.apiUrl || !provider.apiKey)) {
       return createSseEventResponse(
         [
           ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
@@ -1147,7 +1147,7 @@ export async function POST(req: NextRequest) {
 
     let messages = buildProviderMessages(recentHistory, conversationMemoryContext);
 
-    if (modelOption.provider === "openrouter") {
+    if (modelOption.id === "yunwu-gpt-5.4") {
       return createGpt55StreamResponse({
         request: { messages, signal: req.signal },
         events: [
