@@ -195,6 +195,64 @@ function createSseEventResponse(events: unknown[], status = 200) {
   });
 }
 
+function createGpt55StreamResponse(options: {
+  request: Parameters<typeof generateGpt55Text>[0];
+  events: unknown[];
+  sourceHits: RetrievalSourceHit[];
+  user: KbChatUsageUser | null;
+}) {
+  const cancellation = new AbortController();
+  const signal = options.request.signal
+    ? AbortSignal.any([options.request.signal, cancellation.signal])
+    : cancellation.signal;
+  const encoder = new TextEncoder();
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (data: string) => {
+        if (!cancelled) controller.enqueue(encoder.encode(data));
+      };
+      const emit = (event: unknown) => send(`data: ${JSON.stringify(event)}\n\n`);
+      send(": connected\n\n");
+      const heartbeat = setInterval(() => send(": keep-alive\n\n"), 15_000);
+      try {
+        options.events.forEach(emit);
+        const result = await generateGpt55Text({
+          ...options.request,
+          signal,
+          onContent: (content) => emit({ content }),
+        });
+        if (result.hits.length) {
+          emit({ sourceHits: mergeSourceHits(options.sourceHits, result.hits) });
+        }
+        await reportGptUsage(result, options.user);
+      } catch (error) {
+        if (!signal.aborted) {
+          emit({ content: `\n\n${error instanceof Error ? error.message : "回答输出中断，请重新发送问题。"}` });
+        }
+      } finally {
+        clearInterval(heartbeat);
+        if (!cancelled) {
+          send("data: [DONE]\n\n");
+          controller.close();
+        }
+      }
+    },
+    cancel() {
+      cancelled = true;
+      cancellation.abort();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+      Connection: "keep-alive",
+    },
+  });
+}
+
 function normalizeHistory(history: unknown): HistoryMessage[] {
   if (!Array.isArray(history)) return [];
 
@@ -972,19 +1030,27 @@ export async function POST(req: NextRequest) {
           }
 
           try {
-            const webResult = modelOption.provider === "openrouter"
-              ? await generateGpt55Text({
+            if (modelOption.provider === "openrouter") {
+              return createGpt55StreamResponse({
+                request: {
                   messages: [
                     { role: "system", content: `${systemPrompt}\n\n${webSearchInstruction}` },
                     { role: "user", content: answerContext },
                   ],
                   webSearch: true,
                   signal: req.signal,
-                }).then(async (result) => {
-                  await reportGptUsage(result, usageUser);
-                  return result;
-                })
-              : await generateResponsesWebSearch({
+                },
+                events: [
+                  ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+                  ...(effectiveKbHits.length > 0 ? [{ kbHits: effectiveKbHits }] : []),
+                  ...(effectiveSourceHits.length > 0 ? [{ sourceHits: effectiveSourceHits }] : []),
+                  ...(effectiveMediaItems.length > 0 ? [{ mediaItems: effectiveMediaItems }] : []),
+                ],
+                sourceHits: effectiveSourceHits,
+                user: usageUser,
+              });
+            }
+            const webResult = await generateResponsesWebSearch({
               client: {
                 baseUrl: provider.baseUrl,
                 apiKey: provider.apiKey,
@@ -1082,28 +1148,17 @@ export async function POST(req: NextRequest) {
     let messages = buildProviderMessages(recentHistory, conversationMemoryContext);
 
     if (modelOption.provider === "openrouter") {
-      try {
-        const result = await generateGpt55Text({ messages, signal: req.signal });
-        await reportGptUsage(result, usageUser);
-
-        return createSseEventResponse(
-          [
-            ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
-            ...(effectiveKbHits.length > 0 ? [{ kbHits: effectiveKbHits }] : []),
-            ...(effectiveSourceHits.length > 0 ? [{ sourceHits: effectiveSourceHits }] : []),
-            ...(effectiveMediaItems.length > 0 ? [{ mediaItems: effectiveMediaItems }] : []),
-            { content: result.text },
-          ]
-        );
-      } catch (error) {
-        console.error("GPT response error:", error);
-        return createSseEventResponse(
-          [
-            ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
-            { content: error instanceof Error ? `GPT 模型调用失败：${error.message}` : "GPT 模型调用失败，请稍后重试。" },
-          ]
-        );
-      }
+      return createGpt55StreamResponse({
+        request: { messages, signal: req.signal },
+        events: [
+          ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+          ...(effectiveKbHits.length > 0 ? [{ kbHits: effectiveKbHits }] : []),
+          ...(effectiveSourceHits.length > 0 ? [{ sourceHits: effectiveSourceHits }] : []),
+          ...(effectiveMediaItems.length > 0 ? [{ mediaItems: effectiveMediaItems }] : []),
+        ],
+        sourceHits: effectiveSourceHits,
+        user: usageUser,
+      });
     }
 
     let response = await fetch(provider.apiUrl, {

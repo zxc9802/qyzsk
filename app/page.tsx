@@ -1,5 +1,6 @@
 "use client";
 
+import { readSseData } from "@/lib/sse";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { DEFAULT_ANSWER_MODE, isAnswerMode, type AnswerMode } from "@/lib/answer-modes";
 import type { ChatStatePayload } from "@/lib/chat-state";
@@ -555,6 +556,7 @@ export default function Home() {
     currentConvos = addMessage(currentConvos, conversationId, assistantMsg);
     setConversations(currentConvos);
     setIsStreaming(true);
+    let accumulated = "";
 
     try {
       const convo = currentConvos.find((c) => c.id === conversationId);
@@ -597,69 +599,54 @@ export default function Home() {
         throw new Error(extractApiErrorMessage(errorPayload, "请求失败"));
       }
 
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let accumulated = "";
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              const data = line.slice(6);
-              if (data === "[DONE]") break;
-              try {
-                const parsed = JSON.parse(data);
-                if (parsed.questionDiagnosis) {
-                  setConversations((prev) =>
-                    updateLastAssistantMessage(prev, conversationId, {
-                      questionDiagnosis: parsed.questionDiagnosis,
-                      modelId:
-                        parsed.questionDiagnosis.mode === "answer" || hasShownClarificationGuide
-                          ? selectedModelId
-                          : undefined,
-                    })
-                  );
-                }
-                if (Array.isArray(parsed.kbHits)) {
-                  setConversations((prev) =>
-                    updateLastAssistantMessage(prev, conversationId, {
-                      kbHits: parsed.kbHits,
-                    })
-                  );
-                }
-                if (Array.isArray(parsed.sourceHits)) {
-                  setConversations((prev) =>
-                    updateLastAssistantMessage(prev, conversationId, {
-                      sourceHits: parsed.sourceHits,
-                    })
-                  );
-                }
-                if (Array.isArray(parsed.mediaItems)) {
-                  setConversations((prev) =>
-                    updateLastAssistantMessage(prev, conversationId, {
-                      mediaItems: parsed.mediaItems,
-                    })
-                  );
-                }
-                if (parsed.content) {
-                  accumulated += parsed.content;
-                  const sanitized = sanitizeAssistantOutput(accumulated);
-                  setConversations((prev) =>
-                    updateLastAssistantMessage(prev, conversationId, {
-                      content: sanitized,
-                    })
-                  );
-                }
-              } catch {
-                // Skip incomplete JSON chunks.
-              }
+      if (response.body) {
+        for await (const data of readSseData(response.body)) {
+          if (data === "[DONE]") break;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.questionDiagnosis) {
+              setConversations((prev) =>
+                updateLastAssistantMessage(prev, conversationId, {
+                  questionDiagnosis: parsed.questionDiagnosis,
+                  modelId:
+                    parsed.questionDiagnosis.mode === "answer" || hasShownClarificationGuide
+                      ? selectedModelId
+                      : undefined,
+                })
+              );
             }
+            if (Array.isArray(parsed.kbHits)) {
+              setConversations((prev) =>
+                updateLastAssistantMessage(prev, conversationId, {
+                  kbHits: parsed.kbHits,
+                })
+              );
+            }
+            if (Array.isArray(parsed.sourceHits)) {
+              setConversations((prev) =>
+                updateLastAssistantMessage(prev, conversationId, {
+                  sourceHits: parsed.sourceHits,
+                })
+              );
+            }
+            if (Array.isArray(parsed.mediaItems)) {
+              setConversations((prev) =>
+                updateLastAssistantMessage(prev, conversationId, {
+                  mediaItems: parsed.mediaItems,
+                })
+              );
+            }
+            if (parsed.content) {
+              accumulated += parsed.content;
+              const sanitized = sanitizeAssistantOutput(accumulated);
+              setConversations((prev) =>
+                updateLastAssistantMessage(prev, conversationId, {
+                  content: sanitized,
+                })
+              );
+            }
+          } catch {
+            // Skip malformed events; network fragments are buffered by readSseData.
           }
         }
       }
@@ -669,7 +656,9 @@ export default function Home() {
         updateLastAssistantMessage(
           prev,
           conversationId,
-          { content: "抱歉，请求出现问题，请稍后再试。" }
+          { content: accumulated
+            ? `${sanitizeAssistantOutput(accumulated)}\n\n回答连接中断，请重新发送问题。`
+            : "抱歉，请求出现问题，请稍后再试。" }
         )
       );
     } finally {

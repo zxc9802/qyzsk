@@ -3,24 +3,56 @@ import { getChatModelOption } from "@/lib/chat-models";
 import type { ProviderMessage } from "@/lib/server/claude-messages";
 import { buildResponsesRequest, generateResponsesText } from "@/lib/server/openai-responses";
 import { extractResponsesWebSearchHits } from "@/lib/server/openai-web-search";
+import { readSseData } from "@/lib/sse";
+
+type OpenRouterMessage = {
+  content?: string;
+  annotations?: Array<{
+    type?: string;
+    url_citation?: { url?: string; title?: string };
+  }>;
+};
 
 type OpenRouterPayload = {
   model?: string;
   error?: { message?: string };
   usage?: unknown;
   choices?: Array<{
-    message?: {
-      content?: string;
-      annotations?: Array<{
-        type?: string;
-        url_citation?: { url?: string; title?: string };
-      }>;
-    };
+    finish_reason?: string | null;
+    delta?: OpenRouterMessage;
+    message?: OpenRouterMessage;
   }>;
 };
 
-// Keep the full answer buffered, as with the existing GPT Responses path, so a
-// failed attempt cannot leak partial text before a retry or provider fallback.
+async function readOpenRouterStream(response: Response, onContent: (text: string) => void) {
+  if (!response.body) throw new Error("OpenRouter 返回了空数据流。");
+  let text = "";
+  let completed = false;
+  const annotations: NonNullable<OpenRouterMessage["annotations"]> = [];
+  const payload: OpenRouterPayload = {};
+  for await (const data of readSseData(response.body)) {
+    if (data === "[DONE]") {
+      completed = true;
+      break;
+    }
+    const chunk = JSON.parse(data) as OpenRouterPayload;
+    const choice = chunk.choices?.[0];
+    if (chunk.error || choice?.finish_reason === "error") throw new Error("OpenRouter 流式输出失败。");
+    if (chunk.model) payload.model = chunk.model;
+    if (chunk.usage) payload.usage = chunk.usage;
+    if (choice?.finish_reason) completed = true;
+    if (choice?.delta?.annotations) annotations.push(...choice.delta.annotations);
+    const content = choice?.delta?.content;
+    if (typeof content === "string" && content) {
+      text += content;
+      onContent(content);
+    }
+  }
+  if (!completed) throw new Error("OpenRouter 流式连接提前中断。");
+  payload.choices = [{ message: { content: text, annotations } }];
+  return payload;
+}
+
 export async function generateGpt55Text(options: {
   messages: ProviderMessage[];
   temperature?: number;
@@ -28,6 +60,7 @@ export async function generateGpt55Text(options: {
   webSearch?: boolean;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  onContent?: (text: string) => void;
 }) {
   const fetchImpl = options.fetchImpl || fetch;
   const primary = getChatModelOption("yunwu-gpt-5.4");
@@ -35,6 +68,11 @@ export async function generateGpt55Text(options: {
   const baseUrl = (process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1").replace(/\/+$/, "");
   const apiKey = process.env.OPENROUTER_API_KEY?.trim() || "";
   const maxTokens = options.maxTokens ?? 4096;
+  let emittedContent = false;
+  const onContent = options.onContent ? (text: string) => {
+    emittedContent = true;
+    options.onContent!(text);
+  } : undefined;
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
     options.signal?.throwIfAborted();
@@ -51,19 +89,24 @@ export async function generateGpt55Text(options: {
         body: JSON.stringify({
           model: primary.apiModel,
           messages: options.messages,
-          stream: false,
+          stream: Boolean(onContent),
+          ...(onContent ? { stream_options: { include_usage: true } } : {}),
           max_tokens: maxTokens,
           temperature: options.temperature ?? 0.3,
           ...(options.webSearch ? { plugins: [{ id: "web" }] } : {}),
         }),
       });
-      const payload = await response.json() as OpenRouterPayload;
+      const isStream = Boolean(onContent && response.ok && response.headers.get("content-type")?.includes("text/event-stream"));
+      const payload = isStream
+        ? await readOpenRouterStream(response, onContent!)
+        : await response.json() as OpenRouterPayload;
       if (!response.ok || payload?.error) {
         throw new Error(payload?.error?.message || `OpenRouter HTTP ${response.status}`);
       }
       const message = payload?.choices?.[0]?.message;
       const text = typeof message?.content === "string" ? message.content.trim() : "";
       if (!text) throw new Error("OpenRouter 返回了空内容。");
+      if (!isStream) onContent?.(text);
 
       return {
         text,
@@ -79,6 +122,8 @@ export async function generateGpt55Text(options: {
       };
     } catch {
       options.signal?.throwIfAborted();
+      // Once text is visible, retrying would duplicate or replace the answer.
+      if (emittedContent) throw new Error("回答输出中断，请重新发送问题。");
       // Do not log raw provider errors: they can contain request credentials.
       console.warn(`OpenRouter ${primary.apiModel} attempt ${attempt + 1}/4 failed.`);
       if (attempt < 3) await delay(250 * 2 ** attempt, undefined, { signal: options.signal });
@@ -102,6 +147,7 @@ export async function generateGpt55Text(options: {
     webSearch: options.webSearch,
     signal: options.signal ? AbortSignal.any([options.signal, timeout]) : timeout,
     fetchImpl,
+    onContent,
   });
   return {
     ...result,

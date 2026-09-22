@@ -1,4 +1,5 @@
 import type { ProviderMessage } from "@/lib/server/claude-messages";
+import { readSseData } from "@/lib/sse";
 
 export type OpenAIResponsesPayload = {
   model?: string;
@@ -74,13 +75,14 @@ export async function generateResponsesText(options: {
   webSearch?: boolean;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  onContent?: (text: string) => void;
 }): Promise<{ text: string; payload: OpenAIResponsesPayload }> {
   const fetchImpl = options.fetchImpl || fetch;
   const response = await fetchImpl(`${normalizeBaseUrl(options.baseUrl)}/responses`, {
     method: "POST",
     signal: options.signal,
     headers: {
-      Accept: "application/json",
+      Accept: options.onContent ? "text/event-stream" : "application/json",
       Authorization: `Bearer ${options.apiKey}`,
       "Content-Type": "application/json",
     },
@@ -89,9 +91,43 @@ export async function generateResponsesText(options: {
       instructions: options.instructions,
       input: options.input,
       max_output_tokens: options.maxOutputTokens || 4096,
+      ...(options.onContent ? { stream: true } : {}),
       ...(options.webSearch ? { tools: [{ type: "web_search_preview" }] } : {}),
     }),
   });
+
+  if (options.onContent && response.ok && response.headers.get("content-type")?.includes("text/event-stream")) {
+    if (!response.body) throw new Error("OpenLux 返回了空数据流。");
+    let text = "";
+    let payload: OpenAIResponsesPayload | undefined;
+    for await (const data of readSseData(response.body)) {
+      if (data === "[DONE]") break;
+      const event = JSON.parse(data) as {
+        type?: string;
+        delta?: string;
+        error?: unknown;
+        response?: OpenAIResponsesPayload;
+      };
+      if (event.error || event.response?.error || ["error", "response.failed", "response.incomplete"].includes(event.type || "")) {
+        throw new Error("备用模型流式输出中断，请重新发送问题。");
+      }
+      if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
+        text += event.delta;
+        options.onContent(event.delta);
+      }
+      if (event.type === "response.completed") {
+        payload = event.response;
+        break;
+      }
+    }
+    if (!payload) throw new Error("备用模型流式连接提前中断。");
+    if (!text) {
+      text = extractResponsesText(payload);
+      if (text) options.onContent(text);
+    }
+    if (!text.trim()) throw new Error("备用模型返回了空内容。");
+    return { text, payload };
+  }
 
   const rawText = await response.text();
   let payload: OpenAIResponsesPayload | null = null;
@@ -116,6 +152,8 @@ export async function generateResponsesText(options: {
   if (!text) {
     throw new Error("OpenLux Responses returned an empty response.");
   }
+
+  options.onContent?.(text);
 
   return { text, payload };
 }

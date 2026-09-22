@@ -129,3 +129,100 @@ test("failure of the fallback is surfaced after exactly four primary attempts", 
   } }), /Luna unavailable/);
   assert.equal(calls, 5);
 });
+
+function sseResponse(events: unknown[]) {
+  return new Response(events.map((event) => `data: ${typeof event === "string" ? event : JSON.stringify(event)}\n\n`).join(""), {
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
+
+test("DeepSeek emits text before completion and retains final usage and web citations", async () => {
+  const encoder = new TextEncoder();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  let sawFirst!: () => void;
+  const firstContent = new Promise<void>((resolve) => { sawFirst = resolve; });
+  const chunks: string[] = [];
+  let completed = false;
+  const resultPromise = generateGpt55Text({
+    messages,
+    webSearch: true,
+    onContent(content) { chunks.push(content); sawFirst(); },
+    fetchImpl: async (_, init) => {
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.stream, true);
+      assert.deepEqual(body.stream_options, { include_usage: true });
+      assert.deepEqual(body.plugins, [{ id: "web" }]);
+      return new Response(new ReadableStream<Uint8Array>({ start(value) { controller = value; } }), {
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    },
+  }).then((result) => { completed = true; return result; });
+  controller.enqueue(encoder.encode(`: processing\n\ndata: ${JSON.stringify({ choices: [{ delta: { content: "你" } }] })}\n\n`));
+  await firstContent;
+  assert.equal(completed, false);
+  assert.deepEqual(chunks, ["你"]);
+  const tail = [
+    { choices: [{ delta: { content: "好", annotations: [{ type: "url_citation", url_citation: { url: "https://example.com/source", title: "Source" } }] } }] },
+    { model: primaryPayload.model, choices: [{ delta: {}, finish_reason: "stop" }], usage: primaryPayload.usage },
+    "[DONE]",
+  ].map((event) => `data: ${typeof event === "string" ? event : JSON.stringify(event)}\n\n`).join("");
+  for (const byte of encoder.encode(tail)) controller.enqueue(Uint8Array.of(byte));
+  controller.close();
+  const result = await resultPromise;
+  assert.equal(result.text, "你好");
+  assert.deepEqual(chunks, ["你", "好"]);
+  assert.deepEqual(result.payload.usage, primaryPayload.usage);
+  assert.equal(result.hits[0].url, "https://example.com/source");
+});
+
+test("SSE failures before visible text retry three times, then stream Luna", async () => {
+  const models: string[] = [];
+  const chunks: string[] = [];
+  const result = await generateGpt55Text({ messages, onContent: (content) => chunks.push(content), fetchImpl: async (_, init) => {
+    const body = JSON.parse(String(init?.body));
+    models.push(body.model);
+    assert.equal(body.stream, true);
+    if (models.length < 5) return sseResponse([{ error: { message: "busy" }, choices: [{ finish_reason: "error" }] }]);
+    return sseResponse([
+      { type: "response.output_text.delta", delta: "Luna " },
+      { type: "response.output_text.delta", delta: "answer" },
+      { type: "response.completed", response: { model: "gpt-5.6-luna", output_text: "Luna answer", usage: { input_tokens: 10, output_tokens: 2 } } },
+    ]);
+  } });
+  assert.deepEqual(models, [...Array(4).fill(primaryPayload.model), "gpt-5.6-luna"]);
+  assert.deepEqual(chunks, ["Luna ", "answer"]);
+  assert.equal(result.providerId, "openlux");
+  assert.equal(result.text, "Luna answer");
+  assert.deepEqual(result.payload.usage, { input_tokens: 10, output_tokens: 2 });
+});
+
+for (const failure of ["error-event", "truncated-stream"]) {
+  test(`a ${failure} after visible text never retries or switches models`, async () => {
+    let calls = 0;
+    const chunks: string[] = [];
+    await assert.rejects(generateGpt55Text({ messages, onContent: (content) => chunks.push(content), fetchImpl: async () => {
+      calls += 1;
+      return sseResponse([
+        { choices: [{ delta: { content: "Partial answer" } }] },
+        ...(failure === "error-event" ? [{ error: { message: "disconnected" } }] : []),
+      ]);
+    } }), /回答输出中断/);
+    assert.equal(calls, 1);
+    assert.deepEqual(chunks, ["Partial answer"]);
+  });
+}
+
+test("reasoning-only empty streams can retry before the first answer token", async () => {
+  let calls = 0;
+  const chunks: string[] = [];
+  const result = await generateGpt55Text({ messages, onContent: (content) => chunks.push(content), fetchImpl: async () => {
+    calls += 1;
+    return sseResponse([
+      { choices: [{ delta: calls === 1 ? { reasoning: "not answer text" } : { content: "Answer" } }] },
+      "[DONE]",
+    ]);
+  } });
+  assert.equal(calls, 2);
+  assert.deepEqual(chunks, ["Answer"]);
+  assert.equal(result.text, "Answer");
+});
