@@ -1,3 +1,4 @@
+import { generateGpt55Text } from "@/lib/server/openrouter-chat";
 import { NextRequest } from "next/server";
 import { DEFAULT_ANSWER_MODE, isAnswerMode } from "@/lib/answer-modes";
 import { DEFAULT_CHAT_MODEL_ID, getChatModelOption, isChatModelId } from "@/lib/chat-models";
@@ -83,6 +84,12 @@ const PROVIDER_CONFIG = {
     apiUrl: buildApiUrl(process.env.YUNWU_BASE_URL || "https://yunwu.ai/v1"),
     displayName: "Yunwu 网关",
   },
+  openrouter: {
+    apiKey: process.env.OPENROUTER_API_KEY?.trim() || "",
+    baseUrl: process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1",
+    apiUrl: buildApiUrl(process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1"),
+    displayName: "OpenRouter 网关",
+  },
   yunwu_claude_messages: {
     apiKey: process.env.YUNWU_CLAUDE_CHAT_API_KEY?.trim() || "",
     baseUrl: buildProviderBaseUrl(process.env.YUNWU_CLAUDE_MESSAGES_URL || ""),
@@ -149,6 +156,23 @@ function buildProviderBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, "");
 }
 
+async function reportGptUsage(
+  result: { payload: unknown; model: string; providerId: string },
+  user: KbChatUsageUser | null
+) {
+  const usage = mergeStreamUsage(null, extractStreamUsageFragment(result.payload));
+  if (!usage || !user) return;
+  await reportKbChatTextUsage({
+    user,
+    model: result.model,
+    providerId: result.providerId,
+    usage,
+    groupMultiplier: Number(result.providerId === "openrouter"
+      ? process.env.OPENROUTER_GROUP_MULTIPLIER
+      : process.env.OPENLUX_GROUP_MULTIPLIER) || 1,
+  });
+}
+
 function createJsonResponse(body: unknown, status: number) {
   return new Response(JSON.stringify(body), {
     status,
@@ -199,11 +223,25 @@ function normalizeHistory(history: unknown): HistoryMessage[] {
 }
 
 async function runModelDiagnosis(
+  modelOption: ReturnType<typeof getChatModelOption>,
   apiUrl: string,
   apiKey: string,
   apiModel: string,
-  prompt: string | OpenAIContentPart[]
+  prompt: string | OpenAIContentPart[],
+  signal?: AbortSignal
 ): Promise<string | null> {
+  if (modelOption.provider === "openrouter") {
+    return generateGpt55Text({
+      messages: [
+        { role: "system", content: "你只做 JSON 诊断输出，不做业务回答，不要输出多余文字。" },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.1,
+      maxTokens: 300,
+      signal,
+    }).then((result) => result.text).catch(() => null);
+  }
+
   const response = await fetch(apiUrl, {
     method: "POST",
     headers: {
@@ -294,7 +332,7 @@ function isGeminiModel(modelOption: ReturnType<typeof getChatModelOption>): bool
 }
 
 function isGptModel(modelOption: ReturnType<typeof getChatModelOption>): boolean {
-  return modelOption.apiModel.startsWith("gpt-");
+  return modelOption.provider === "openrouter" || modelOption.apiModel.startsWith("gpt-");
 }
 
 function buildProviderRequestBody(
@@ -671,7 +709,7 @@ export async function POST(req: NextRequest) {
       const fallbackDiagnosisResult = diagnoseQuestion(message, role || "new", diagnosisHistory);
       let diagnosisResult = fallbackDiagnosisResult;
 
-      if (provider.apiUrl && provider.apiKey) {
+      if ((provider.apiUrl && provider.apiKey) || modelOption.provider === "openrouter") {
         let diagnosisReview = null;
 
         if (fallbackDiagnosisResult.modelReviewPrompt) {
@@ -694,12 +732,14 @@ export async function POST(req: NextRequest) {
                       : fallbackDiagnosisResult.modelReviewPrompt
                   )
               : await runModelDiagnosis(
+                  modelOption,
                   provider.apiUrl,
                   provider.apiKey,
                   apiModel,
                   mediaContext.hasMedia
                     ? [buildOpenAITextPart(fallbackDiagnosisResult.modelReviewPrompt), ...mediaContext.openAIParts]
-                    : fallbackDiagnosisResult.modelReviewPrompt
+                    : fallbackDiagnosisResult.modelReviewPrompt,
+                  req.signal
                 );
 
           diagnosisReview = parseDiagnosisReview(reviewContent || "");
@@ -730,12 +770,14 @@ export async function POST(req: NextRequest) {
                     : diagnosisPrompt
                 )
             : await runModelDiagnosis(
+                modelOption,
                 provider.apiUrl,
                 provider.apiKey,
                 apiModel,
                 mediaContext.hasMedia
                   ? [buildOpenAITextPart(diagnosisPrompt), ...mediaContext.openAIParts]
-                  : diagnosisPrompt
+                  : diagnosisPrompt,
+                req.signal
               );
 
         const parsedModelDiagnosis = parseModelDiagnosisResult(modelDiagnosisContent || "", message);
@@ -797,7 +839,7 @@ export async function POST(req: NextRequest) {
     const fileContext = retrieval.fileContext;
     const kbHits = retrieval.kbHits;
     const sourceHits = retrieval.sourceHits;
-    const canUseReliableWebSearch = isGptModel(modelOption) && !mediaContext.hasMedia && provider.apiKey !== "";
+    const canUseReliableWebSearch = isGptModel(modelOption) && !mediaContext.hasMedia && (provider.apiKey !== "" || (modelOption.provider === "openrouter" && Boolean(process.env.OPENLUX_API_KEY?.trim())));
     const webSearchPolicy = buildWebSearchPolicyDecision({
       query: message,
       diagnosis,
@@ -920,7 +962,7 @@ export async function POST(req: NextRequest) {
 
       if (isGptModel(modelOption) && !mediaContext.hasMedia) {
         if (webSearchPolicy.shouldAutoSearchWeb) {
-          if (!provider.baseUrl || !provider.apiKey) {
+          if (modelOption.provider !== "openrouter" && (!provider.baseUrl || !provider.apiKey)) {
           return createSseEventResponse(
             [
               ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
@@ -930,7 +972,19 @@ export async function POST(req: NextRequest) {
           }
 
           try {
-            const webResult = await generateResponsesWebSearch({
+            const webResult = modelOption.provider === "openrouter"
+              ? await generateGpt55Text({
+                  messages: [
+                    { role: "system", content: `${systemPrompt}\n\n${webSearchInstruction}` },
+                    { role: "user", content: answerContext },
+                  ],
+                  webSearch: true,
+                  signal: req.signal,
+                }).then(async (result) => {
+                  await reportGptUsage(result, usageUser);
+                  return result;
+                })
+              : await generateResponsesWebSearch({
               client: {
                 baseUrl: provider.baseUrl,
                 apiKey: provider.apiKey,
@@ -964,7 +1018,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!provider.apiUrl || !provider.apiKey) {
+    if (modelOption.provider !== "openrouter" && (!provider.apiUrl || !provider.apiKey)) {
       return createSseEventResponse(
         [
           ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
@@ -1026,6 +1080,32 @@ export async function POST(req: NextRequest) {
     ];
 
     let messages = buildProviderMessages(recentHistory, conversationMemoryContext);
+
+    if (modelOption.provider === "openrouter") {
+      try {
+        const result = await generateGpt55Text({ messages, signal: req.signal });
+        await reportGptUsage(result, usageUser);
+
+        return createSseEventResponse(
+          [
+            ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+            ...(effectiveKbHits.length > 0 ? [{ kbHits: effectiveKbHits }] : []),
+            ...(effectiveSourceHits.length > 0 ? [{ sourceHits: effectiveSourceHits }] : []),
+            ...(effectiveMediaItems.length > 0 ? [{ mediaItems: effectiveMediaItems }] : []),
+            { content: result.text },
+          ]
+        );
+      } catch (error) {
+        console.error("GPT response error:", error);
+        return createSseEventResponse(
+          [
+            ...(diagnosis ? [{ questionDiagnosis: diagnosis }] : []),
+            { content: error instanceof Error ? `GPT 模型调用失败：${error.message}` : "GPT 模型调用失败，请稍后重试。" },
+          ]
+        );
+      }
+    }
+
     let response = await fetch(provider.apiUrl, {
       method: "POST",
       headers: {

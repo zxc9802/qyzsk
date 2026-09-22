@@ -1,3 +1,4 @@
+import { generateGpt55Text } from "@/lib/server/openrouter-chat";
 import { getChatModelOption } from "@/lib/chat-models";
 import { buildClaudeMessagesPayload, readClaudeMessagesText } from "@/lib/server/claude-messages";
 
@@ -11,6 +12,11 @@ const PROVIDER_CONFIG = {
     apiKey: process.env.YUNWU_API_KEY?.trim() || "",
     apiUrl: buildApiUrl(process.env.YUNWU_BASE_URL || "https://yunwu.ai/v1"),
     displayName: "Yunwu 网关",
+  },
+  openrouter: {
+    apiKey: process.env.OPENROUTER_API_KEY?.trim() || "",
+    apiUrl: buildApiUrl(process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1"),
+    displayName: "OpenRouter 网关",
   },
   yunwu_claude_messages: {
     apiKey: process.env.YUNWU_CLAUDE_CHAT_API_KEY?.trim() || "",
@@ -57,6 +63,18 @@ export async function generateModelText(options: {
   maxTokens?: number;
 }): Promise<string> {
   const { modelOption, provider } = resolveProviderConfig(options.modelId);
+
+  if (modelOption.provider === "openrouter") {
+    const result = await generateGpt55Text({
+      messages: [
+        { role: "system", content: options.systemPrompt },
+        { role: "user", content: options.userPrompt },
+      ],
+      temperature: options.temperature ?? 0.2,
+      maxTokens: options.maxTokens ?? 2600,
+    });
+    return result.text;
+  }
 
   if (!provider.apiUrl || !provider.apiKey) {
     throw new Error(`${provider.displayName} 还没有配置完整。`);

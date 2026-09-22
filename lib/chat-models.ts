@@ -1,4 +1,4 @@
-export type ChatProviderId = "newapi" | "yunwu" | "yunwu_claude_messages";
+export type ChatProviderId = "newapi" | "yunwu" | "openrouter" | "yunwu_claude_messages";
 
 export type ChatModelId =
   | "gemini-3.1-pro-preview"
@@ -60,9 +60,9 @@ export const CHAT_MODELS: ChatModelOption[] = [
     id: "yunwu-gpt-5.4",
     label: "GPT-5.5",
     shortLabel: "GPT-5.5",
-    provider: "yunwu",
-    apiModel: "gpt-5.6-luna",
-    description: "走 Yunwu 的 GPT-5.5",
+    provider: "openrouter",
+    apiModel: "deepseek/deepseek-v4.1-flash",
+    description: "适合日常问答与深入分析",
   },
 ];
 

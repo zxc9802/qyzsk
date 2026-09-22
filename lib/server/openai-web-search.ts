@@ -79,7 +79,7 @@ function getSiteName(url: string) {
   }
 }
 
-function extractHits(payload: OpenAIResponsesPayload): RetrievalSourceHit[] {
+export function extractResponsesWebSearchHits(payload: OpenAIResponsesPayload): RetrievalSourceHit[] {
   const annotations = (payload.output || [])
     .flatMap((item) => item.content || [])
     .flatMap((item) => item.annotations || [])
@@ -150,6 +150,6 @@ export async function generateResponsesWebSearch({
 
   return {
     text,
-    hits: payload ? extractHits(payload) : [],
+    hits: payload ? extractResponsesWebSearchHits(payload) : [],
   };
 }
